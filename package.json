@@ -16,6 +16,9 @@
   "keywords": ["claude", "claude-code", "sync", "syncthing", "backup", "electron", "cross-platform"],
   "author": "Maxwell Pinz",
   "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/Mpinz109/claude-sync.git" },
+  "homepage": "https://github.com/Mpinz109/claude-sync#readme",
+  "bugs": { "url": "https://github.com/Mpinz109/claude-sync/issues" },
   "engines": {
     "node": ">=18"
   },
@@ -27,7 +30,8 @@
     "bin",
     "src",
     "README.md",
-    "DESIGN.md"
-  ],
-  "license": "MIT"
+    "DESIGN.md",
+    "LAPTOP-SETUP.md",
+    "LICENSE"
+  ]
 }
