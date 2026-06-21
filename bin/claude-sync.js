@@ -4,9 +4,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolvePaths, findBundledCli, claudeRunning } from '../src/platform.js';
-import { loadConfig, saveConfig, addProject, setSetting } from '../src/config.js';
+import { loadConfig, saveConfig, addProject, linkProjects, setSetting } from '../src/config.js';
 import { initVault } from '../src/vault.js';
-import { pushAll, pullAll, status as syncStatus } from '../src/sync.js';
+import { pushAll, pullAll, adoptFromVault, discoverProjects, status as syncStatus } from '../src/sync.js';
 import { gatherStatus } from '../src/status.js';
 import { c, ok, warn, bad } from '../src/util.js';
 
@@ -48,6 +48,23 @@ function link() {
   console.log(ok(`linked "${name}" -> ${localPath} ${c.dim(`(${id.slice(0, 8)})`)}`));
 }
 
+function linkAll() {
+  const d = discoverProjects();
+  if (!d.length) { console.log(warn('no unlinked projects detected')); return; }
+  const r = linkProjects(d);
+  console.log(ok(`linked ${r.added} project(s); ${r.total} total`));
+  for (const p of d) console.log(c.dim(`  + ${p.name}`));
+}
+
+function adopt() {
+  const cfg = loadConfig();
+  if (!cfg.vaultDir) { console.log(bad('no vault — run `claude-sync init --vault <folder>` first')); return; }
+  const r = adoptFromVault();
+  for (const a of r.adopted) console.log(ok(`adopted "${a.name}" -> ${a.localPath}`));
+  if (r.already.length) console.log(c.dim(`already linked: ${r.already.join(', ')}`));
+  if (r.unmatched.length) console.log(warn(`no local folder found for: ${r.unmatched.join(', ')} (sync the files first, then re-run adopt)`));
+}
+
 function statusCmd() {
   const cfg = loadConfig();
   if (!cfg.vaultDir) { console.log(warn('no vault set — run `claude-sync init --vault <folder>`')); return; }
@@ -84,6 +101,8 @@ function help() {
   doctor                       health + detected paths
   init --vault <folder>        point at the shared vault folder
   link <name> <localPath>      track a project folder
+  link-all                     auto-detect and link all local projects (first machine)
+  adopt                        on a 2nd machine: link the vault's projects to local folders (by name)
   status                       what would push / pull
   push                         local -> vault (safe, additive)
   pull [--yes] [--force]       vault -> local (dry-run unless --yes; needs Claude closed)
@@ -91,7 +110,7 @@ function help() {
 GUI: \`npm run app\`.  Architecture: DESIGN.md.`);
 }
 
-const table = { doctor, init, link, status: statusCmd, push, pull, help, '--help': help, '-h': help };
+const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, help, '--help': help, '-h': help };
 
 (async () => {
   const fn = table[cmd] || (cmd ? () => { console.log(bad(`unknown command: ${cmd}`)); help(); } : help);

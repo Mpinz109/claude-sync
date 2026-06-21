@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { gatherStatus } from '../src/status.js';
 import { loadConfig, saveConfig, setSetting, addProject, linkProjects } from '../src/config.js';
 import { initVault } from '../src/vault.js';
-import { pushAll, pullAll, syncAll, discoverProjects, status as syncStatus } from '../src/sync.js';
+import { pushAll, pullAll, syncAll, discoverProjects, adoptFromVault, status as syncStatus } from '../src/sync.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let win = null;
@@ -63,6 +63,7 @@ ipcMain.handle('engine:push', () => pushAll());
 ipcMain.handle('engine:pull', (_e, opts) => pullAll(undefined, undefined, opts || { dryRun: true }));
 ipcMain.handle('engine:syncAll', (_e, opts) => syncAll(undefined, undefined, opts || {}));
 ipcMain.handle('engine:discover', () => discoverProjects());
+ipcMain.handle('engine:adopt', () => adoptFromVault());
 ipcMain.handle('engine:linkAll', (_e, list) => linkProjects(list));
 // Real Device ID lands with the Syncthing manager (phase 4):
 ipcMain.handle('engine:deviceId', () => ({ deviceId: null, note: 'Syncthing not bundled yet (phase 4)' }));

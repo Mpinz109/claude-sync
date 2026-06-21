@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolvePaths, claudeRunning } from './platform.js';
-import { loadConfig } from './config.js';
+import { loadConfig, saveConfig } from './config.js';
 import { readJson } from './util.js';
 import { tokenize, detokenize } from './tokens.js';
 import * as vault from './vault.js';
@@ -103,6 +103,35 @@ export function discoverProjects(paths = resolvePaths(), cfg = loadConfig()) {
     if (cwd && !linked.has(cwd) && fs.existsSync(cwd)) found.set(cwd, path.basename(cwd));
   }
   return [...found].map(([localPath, name]) => ({ name, localPath }));
+}
+
+/**
+ * Adopt the vault's projects on a NEW machine: link each vault project to a local
+ * folder (matched by name, or a path the vault already recorded for this machine),
+ * reusing the vault's project id so pull/push line up across machines.
+ */
+export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths()) {
+  if (!cfg.vaultDir) throw new Error('No vault configured. Run init first.');
+  const projectsDir = path.join(cfg.vaultDir, 'projects');
+  const byName = new Map(discoverProjects(paths, cfg).map((d) => [d.name, d.localPath]));
+  const adopted = [], unmatched = [], already = [];
+  let ids = [];
+  try { ids = fs.readdirSync(projectsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { /* none */ }
+  for (const id of ids) {
+    const pj = readJson(path.join(projectsDir, id, 'project.json'), null);
+    if (!pj) continue;
+    if (cfg.projects.some((p) => p.id === pj.id)) { already.push(pj.name); continue; }
+    const recorded = pj.machines?.[cfg.machineId]?.localPath;
+    const localPath = (recorded && fs.existsSync(recorded)) ? recorded : byName.get(pj.name);
+    if (localPath) {
+      cfg.projects.push({ id: pj.id, name: pj.name, localPath, gitRemote: pj.gitRemote || '' });
+      adopted.push({ name: pj.name, localPath });
+    } else {
+      unmatched.push(pj.name);
+    }
+  }
+  saveConfig(cfg);
+  return { adopted, unmatched, already };
 }
 
 /** What would move, per project. */

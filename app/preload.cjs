@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   pull: (opts) => ipcRenderer.invoke('engine:pull', opts),
   syncAll: (opts) => ipcRenderer.invoke('engine:syncAll', opts),
   discover: () => ipcRenderer.invoke('engine:discover'),
+  adopt: () => ipcRenderer.invoke('engine:adopt'),
   linkAll: (list) => ipcRenderer.invoke('engine:linkAll', list),
   openExternal: (url) => ipcRenderer.invoke('engine:openExternal', url),
   onAction: (cb) => ipcRenderer.on('action', (_e, name) => cb(name)),
