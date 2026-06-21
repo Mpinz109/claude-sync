@@ -1,89 +1,68 @@
-# Task for Claude Code (run this on the LAPTOP)
+# Setting up a second computer
 
-You are Claude Code on Maxwell's **laptop**. A tool called **claude-sync** was built
-on his desktop to sync Claude Code projects + conversation history across his
-computers. Your job: set it up on this laptop and **pull** the sessions the desktop
-published, so its conversations show up here (transcripts + Recents tiles). Then
-optionally **push** this laptop's own sessions back.
+This walks through bringing a **second computer** into sync: pulling the sessions a
+first machine published into the vault, so its conversations show up here
+(transcripts + Recents tiles). It's written so you can hand it to Claude Code on the
+second machine and have it run the steps.
 
-Read `DESIGN.md` and `README.md` in this same folder for the full architecture. The
-short version and exact steps are below. Syncthing transport is not built yet
-(Phase 4), so for this first test the "vault" is moved by hand (USB/cloud).
+Read `DESIGN.md` and `README.md` for the full picture. Until Syncthing transport
+lands, the **vault** folder is moved between machines by hand (USB or any cloud
+folder); after that it mirrors automatically.
 
-## What should be on the USB / handoff drive
+## What you need on this computer
 
-1. The **`claude-sync`** folder (this repo — the tool). Pure Node, no install needed to run the CLI.
-2. A **`claude-vault`** folder — the canonical store the desktop filled with `claude-sync push`. This holds the desktop's sessions, path-tokenized.
+1. The **`claude-sync`** tool (this repo). Pure Node — no install needed to run the CLI.
+2. The **vault** folder that the first machine filled with `claude-sync push`
+   (holds its sessions, path-tokenized). Copy it over, or share it via cloud/USB.
 
-If either is missing, ask Maxwell to copy them over from the desktop.
+## Facts the tool already handles (don't fight them)
 
-## Critical facts (already handled by the tool, do not fight them)
-
-- Claude on Windows is a **Store (MSIX) app**; its data is under
-  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`, NOT `%APPDATA%\Claude`.
+- On Windows, Claude is a **Store (MSIX) app**; its data lives under
+  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`, not `%APPDATA%\Claude`.
   `claude-sync doctor` detects this automatically.
-- Session JSON must be **UTF-8 with no BOM**, or Claude silently skips it. The tool
-  only ever writes BOM-free; do not introduce a BOM if you touch these files.
-- Writing Claude state requires Claude to be **fully closed** (it rewrites its own
-  state on launch/quit). `claude-sync pull` refuses to run while Claude is open.
-- Project folders' transcript dirs are named by an **encoding of the absolute path**
-  (every non-alphanumeric -> `-`). The tool re-encodes per machine; you don't.
+- Session JSON must be **UTF-8 with no BOM** or Claude silently skips it. The tool
+  only writes BOM-free.
+- Writing Claude state needs Claude **fully closed** (it rewrites its own state on
+  launch/quit); `pull` refuses to run while Claude is open.
+- Transcript folders are named by an encoding of the absolute path; the tool
+  re-encodes per machine.
 
 ## Steps
 
-### 1. Make sure Node 18+ is available
-```powershell
+```bash
+# 1. Node 18+ (install user-scope if missing, then use a fresh shell)
 node --version
-```
-If missing, install user-scope (no admin prompt), then use a fresh PowerShell window:
-```powershell
-winget install --id OpenJS.NodeJS.LTS --scope user --accept-package-agreements --accept-source-agreements --silent
-```
+#   Windows: winget install --id OpenJS.NodeJS.LTS --scope user --accept-package-agreements --accept-source-agreements --silent
 
-### 2. Sanity check the tool sees this laptop's Claude
-```powershell
-cd <path-to>\claude-sync
+# 2. Confirm the tool sees this machine's Claude
+cd <path-to>/claude-sync
 node bin/claude-sync.js doctor
-```
-Confirm it reports this laptop's transcripts/recents counts and "claude not running".
 
-### 3. Point at the vault that came from the desktop
-```powershell
-node bin/claude-sync.js init --vault "<path-to>\claude-vault"
-```
+# 3. Point at the vault that came from the first machine
+node bin/claude-sync.js init --vault "<path-to>/vault"
 
-### 4. Adopt the vault's projects onto this laptop
-This links each project the desktop published to the matching local folder on this
-laptop (matched by folder name), reusing the vault's project IDs so pull lines up:
-```powershell
+# 4. Adopt the vault's projects (links them to local folders by name,
+#    reusing the vault's project ids so pull lines up)
 node bin/claude-sync.js adopt
-```
-- "adopted X -> path" means matched and linked.
-- "no local folder found for: Y" means that project's files aren't on this laptop
-  yet. That's expected for projects the laptop doesn't have. Conversation pull needs
-  the folder to exist; if Maxwell wants those, copy the project folder over first,
-  then re-run `adopt`. (Automatic file sync is Phase 5 / git.)
 
-### 5. Preview, then pull (with Claude CLOSED)
-```powershell
-node bin/claude-sync.js status            # shows how many sessions would pull per project
-# fully quit Claude: all windows + tray + confirm no Claude.exe in Task Manager
+# 5. Preview, then pull — with Claude fully closed
+node bin/claude-sync.js status
 node bin/claude-sync.js pull --yes
 ```
 
-### 6. Verify
-Reopen Claude on the laptop. The desktop's conversations should appear as Recents
-tiles and be resumable, with paths remapped to this laptop's locations.
+Reopen Claude. The first machine's conversations should appear as Recents tiles and
+be resumable, with paths remapped to this machine.
 
-## Optionally: publish this laptop's sessions back
-```powershell
-node bin/claude-sync.js push
-```
-Then copy the `claude-vault` folder back to the desktop (or just wait for Phase 4,
-when Syncthing mirrors it automatically) and run `pull` there.
+### Notes
 
-## Report back to Maxwell
-- Output of `doctor`, `adopt`, and `status`.
-- After pull: how many sessions landed, and whether the tiles show on reopen.
-- Any project that came up "no local folder found" (so we know what files still
-  need to move).
+- `adopt` reports "no local folder found for: X" when a project's **files** aren't on
+  this machine yet. Conversation pull needs the folder to exist — copy that project
+  folder over first (file sync via git is on the roadmap), then re-run `adopt`.
+- To publish this machine's own sessions back: `node bin/claude-sync.js push`, then
+  move the vault back (or let Syncthing handle it once that lands).
+
+## Report
+
+After pulling, note: the `doctor`/`adopt`/`status` output, how many sessions landed,
+whether the tiles show on reopen, and any project that came up "no local folder
+found" (so you know which files still need to move).

@@ -13,6 +13,9 @@
     "doctor": "node bin/claude-sync.js doctor",
     "test": "node --test"
   },
+  "keywords": ["claude", "claude-code", "sync", "syncthing", "backup", "electron", "cross-platform"],
+  "author": "Maxwell Pinz",
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },

@@ -1,35 +1,86 @@
 # claude-sync
 
-Keep your Claude Code projects in sync across multiple computers — both the
-**project files** (via git) and the **conversation history** (transcripts,
-Recents tiles, project registration) — two-way, peer-to-peer via Syncthing,
-on Windows, macOS, and Linux.
+> Keep your Claude Code projects in sync across all your computers — the **project
+> files** and the **conversation history** (transcripts, Recents tiles, project
+> registration) — two-way, peer-to-peer, on Windows, macOS, and Linux.
 
-Born from a real migration that uncovered every quirk of how Claude stores
-things: the Windows MSIX sandbox, the transcript path-encoding, and the
-infamous UTF-8 BOM that makes the app silently drop sessions. Those lessons are
-the foundation of this tool. See [DESIGN.md](DESIGN.md).
+**Status: early / work in progress.** The cross-platform engine and history
+round-trip work today (verified byte-exact). The desktop GUI and Syncthing
+auto-transport are in progress. See [DESIGN.md](DESIGN.md) for the architecture and
+roadmap.
 
-## Status
+## Why
 
-Early. Phase 1 (cross-platform detection) is working:
+Claude Code stores your conversations separately from your project files, in
+machine-specific locations with a few sharp edges (on Windows the data lives inside
+the Store-app sandbox; session files must be UTF-8 **with no BOM** or the app
+silently ignores them; transcript folders are named by an encoding of their absolute
+path). Move to a new machine and your chats don't come with you. `claude-sync`
+handles all of that and keeps multiple machines in sync.
 
-```bash
-node bin/claude-sync.js doctor
-```
+## How it works
 
-That reports your OS, where Claude keeps transcripts / registration / Recents on
-this machine, the bundled CLI location, and whether it's safe to write
-(i.e. Claude is closed). Roadmap and architecture are in DESIGN.md.
+- A **vault** (a folder you share between machines) holds your sessions in a
+  machine-independent form: paths are tokenized (`{{PROJECT_ROOT}}`, `{{HOME}}`) and
+  everything is written BOM-free.
+- **push** publishes this machine's sessions into the vault; **pull** materializes
+  vault sessions into this machine's Claude (transcripts + Recents tiles +
+  registration), remapping paths to local locations.
+- Sync is **two-way**, union by session id. Conflicts (a session continued on two
+  machines) are surfaced, not silently overwritten.
+- Transport is **Syncthing** (peer-to-peer, encrypted, with crypto device IDs and
+  pairing) — bundled and managed by the app, so you don't configure it. *(in progress)*
+- Scheduling: a daily background **push** (safe, unattended) plus an **on-open
+  pull** prompt. *(in progress)*
 
 ## Requirements
 
 - Node.js 18+
-- (for file sync) git
-- (for transport) Syncthing
+- git (for syncing project files)
+- Syncthing (bundled by the app once packaging lands)
+
+## Quick start (CLI)
+
+The engine is pure Node — no dependencies needed to run the CLI.
+
+```bash
+git clone https://github.com/<you>/claude-sync
+cd claude-sync
+
+node bin/claude-sync.js doctor                 # detect your Claude install + paths
+node bin/claude-sync.js init --vault <folder>  # the folder you'll share between machines
+node bin/claude-sync.js link-all               # auto-link the projects on this machine
+node bin/claude-sync.js push                   # publish this machine's sessions to the vault
+```
+
+On a **second computer**, point at the same vault and adopt:
+
+```bash
+node bin/claude-sync.js init --vault <the shared folder>
+node bin/claude-sync.js adopt                  # link the vault's projects to local folders
+# fully quit Claude, then:
+node bin/claude-sync.js pull --yes
+```
+
+See [docs: second computer](LAPTOP-SETUP.md) for the full walkthrough.
+
+## GUI
+
+```bash
+npm install     # pulls Electron
+npm run app
+```
+
+A desktop app (Status / Devices / Projects / Schedule / Settings) with one-click
+**Sync all projects**, **Add all detected projects**, device pairing, and the
+schedule — designed to be usable without the command line.
 
 ## Safety
 
 - Never writes a UTF-8 BOM (it breaks Claude's JSON parsing).
 - Refuses to write Claude state while Claude is running.
-- Backs up before destructive steps; conflicts keep both sides.
+- Additive by default; conflicts keep both sides. Back up before first use.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
