@@ -1,0 +1,6 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+# local machine config + vault live outside the repo by default
+.claude-sync/

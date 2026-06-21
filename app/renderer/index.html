@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claude Sync</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <nav class="sidebar">
+      <div class="brand">Claude&nbsp;Sync</div>
+      <button class="nav active" data-screen="status">Status</button>
+      <button class="nav" data-screen="devices">Devices</button>
+      <button class="nav" data-screen="projects">Projects</button>
+      <button class="nav" data-screen="schedule">Schedule</button>
+      <button class="nav" data-screen="settings">Settings</button>
+      <div class="spacer"></div>
+      <button id="syncNow" class="primary">Sync now</button>
+    </nav>
+
+    <main class="content">
+      <!-- STATUS -->
+      <section class="screen" id="screen-status">
+        <h1>Status</h1>
+        <div id="statusCards" class="cards"><div class="muted">Loading…</div></div>
+      </section>
+
+      <!-- DEVICES -->
+      <section class="screen hidden" id="screen-devices">
+        <h1>Devices</h1>
+        <p class="muted">Pair your computers so they can sync peer-to-peer. Share <em>this</em> machine's code, and add the others'.</p>
+        <div class="card">
+          <div class="label">This computer</div>
+          <div id="thisDevice" class="mono big">…</div>
+          <div class="row">
+            <button id="copyId" class="secondary">Copy code</button>
+            <span class="muted small">QR code + scanning come with Syncthing (phase 4)</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="label">Pair a new computer</div>
+          <div class="row">
+            <input id="pairId" placeholder="Paste the other computer's code" />
+            <button class="primary" disabled title="Enabled in phase 4">Pair</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="label">Paired computers</div>
+          <div id="deviceList" class="muted">None yet.</div>
+        </div>
+      </section>
+
+      <!-- PROJECTS -->
+      <section class="screen hidden" id="screen-projects">
+        <h1>Projects</h1>
+        <p class="muted">Folders kept in sync (files via git, conversations via the vault).</p>
+        <div id="projectList" class="muted">No projects linked yet.</div>
+      </section>
+
+      <!-- SCHEDULE -->
+      <section class="screen hidden" id="screen-schedule">
+        <h1>Schedule</h1>
+        <p class="muted">When the background sync runs. It only <strong>publishes</strong> your changes (safe, unattended); incoming changes are merged when you open Claude.</p>
+        <div class="card">
+          <div class="row">
+            <label for="scheduleAt">Run daily at</label>
+            <input type="time" id="scheduleAt" />
+          </div>
+          <label class="check"><input type="checkbox" id="schedulePushOnly" /> Push only (recommended — never writes local Claude state unattended)</label>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="screen hidden" id="screen-settings">
+        <h1>Settings</h1>
+        <div class="card">
+          <label class="check"><input type="checkbox" id="autoMergeIfNoConflicts" /> Auto-merge changes that don't conflict</label>
+          <label class="check"><input type="checkbox" id="promptOnOpen" /> Ask me about incoming changes when I open Claude</label>
+          <label class="check"><input type="checkbox" id="autoMerge" /> Auto-resolve conflicts by newest (keeps the other copy as a backup)</label>
+        </div>
+        <div class="card">
+          <div class="label">Self-hosted relay (optional)</div>
+          <div class="row">
+            <input id="awsDiscovery" placeholder="https://your-aws-discovery-server (optional)" />
+          </div>
+          <span class="muted small">Leave blank to use Syncthing's public discovery/relay.</span>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="renderer.js"></script>
+</body>
+</html>

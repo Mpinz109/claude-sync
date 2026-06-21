@@ -1,0 +1,30 @@
+{
+  "name": "claude-sync",
+  "version": "0.1.0",
+  "description": "Keep Claude Code projects (files + conversation history) in sync across computers. Two-way, peer-to-peer (Syncthing), cross-platform, with a desktop GUI.",
+  "type": "module",
+  "main": "app/main.js",
+  "bin": {
+    "claude-sync": "bin/claude-sync.js"
+  },
+  "scripts": {
+    "app": "electron .",
+    "cli": "node bin/claude-sync.js",
+    "doctor": "node bin/claude-sync.js doctor",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  },
+  "files": [
+    "app",
+    "bin",
+    "src",
+    "README.md",
+    "DESIGN.md"
+  ],
+  "license": "MIT"
+}
