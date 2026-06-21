@@ -65,3 +65,17 @@ export function addProject(name, localPath, gitRemote = '') {
   saveConfig(cfg);
   return id;
 }
+
+/** Link a batch of projects, skipping any whose localPath is already linked. */
+export function linkProjects(list) {
+  const cfg = loadConfig();
+  let added = 0;
+  for (const { name, localPath, gitRemote = '' } of list) {
+    if (!cfg.projects.some((p) => p.localPath === localPath)) {
+      cfg.projects.push({ id: crypto.randomUUID(), name, localPath, gitRemote });
+      added++;
+    }
+  }
+  saveConfig(cfg);
+  return { added, total: cfg.projects.length };
+}

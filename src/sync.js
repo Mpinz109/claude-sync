@@ -1,8 +1,11 @@
 // Orchestration: push (local -> vault) and pull (vault -> local). Phase 3 is
 // additive/union-by-cliSessionId; merge + conflict handling is phase 5.
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { resolvePaths, claudeRunning } from './platform.js';
 import { loadConfig } from './config.js';
+import { readJson } from './util.js';
 import { tokenize, detokenize } from './tokens.js';
 import * as vault from './vault.js';
 import * as local from './local.js';
@@ -76,6 +79,30 @@ export async function pullAll(cfg = loadConfig(), paths = resolvePaths(), { dryR
     return { blocked: true, reason: 'Claude is running. Close it before pulling (it rewrites its own state on launch/quit).' };
   }
   return { blocked: false, results: cfg.projects.map((p) => pullProject(cfg, p, paths, { dryRun })) };
+}
+
+/** Full sync of every linked project: push, then (Claude-closed) pull. */
+export async function syncAll(cfg = loadConfig(), paths = resolvePaths(), { force = false } = {}) {
+  const push = pushAll(cfg, paths);
+  const pull = await pullAll(cfg, paths, { dryRun: false, force });
+  return { push, pull };
+}
+
+/** Discover local Claude projects not yet linked (from .claude.json + recents cwds). */
+export function discoverProjects(paths = resolvePaths(), cfg = loadConfig()) {
+  const linked = new Set(cfg.projects.map((p) => p.localPath));
+  const found = new Map(); // localPath -> name
+  try {
+    const j = readJson(paths.claudeJson, {});
+    for (const p of Object.keys(j.projects || {})) {
+      if (!linked.has(p) && fs.existsSync(p)) found.set(p, path.basename(p));
+    }
+  } catch { /* no registration */ }
+  for (const { entry } of local.readRecentsIndex(paths).values()) {
+    const cwd = entry.cwd;
+    if (cwd && !linked.has(cwd) && fs.existsSync(cwd)) found.set(cwd, path.basename(cwd));
+  }
+  return [...found].map(([localPath, name]) => ({ name, localPath }));
 }
 
 /** What would move, per project. */

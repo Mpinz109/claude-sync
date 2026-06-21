@@ -16,7 +16,7 @@
       <button class="nav" data-screen="schedule">Schedule</button>
       <button class="nav" data-screen="settings">Settings</button>
       <div class="spacer"></div>
-      <button id="syncNow" class="primary">Sync now</button>
+      <button id="syncNow" class="primary">Sync all</button>
     </nav>
 
     <main class="content">
@@ -55,7 +55,15 @@
       <section class="screen hidden" id="screen-projects">
         <h1>Projects</h1>
         <p class="muted">Folders kept in sync (files via git, conversations via the vault).</p>
+        <div class="row" style="margin:8px 0 4px">
+          <button id="syncAll" class="primary">Sync all projects</button>
+          <button id="addAll" class="secondary">Add all detected projects</button>
+          <span id="syncResult" class="muted small"></span>
+        </div>
+        <div class="label" style="margin-top:14px">Linked</div>
         <div id="projectList" class="muted">No projects linked yet.</div>
+        <div class="label" style="margin-top:18px">Detected on this computer (not linked)</div>
+        <div id="discoverList" class="muted">—</div>
       </section>
 
       <!-- SCHEDULE -->

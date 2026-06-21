@@ -13,6 +13,9 @@ if (!window.api) {
     deviceId: async () => ({ deviceId: null, note: '(preview) — real Device ID appears once Syncthing is bundled' }),
     setSetting: async () => {}, setVault: async () => {}, addProject: async () => {},
     push: async () => ({ ok: false }), pull: async () => ({ ok: false }),
+    syncAll: async () => ({ push: [], pull: { blocked: false, results: [] } }),
+    discover: async () => ([{ name: 'Example Project', localPath: 'C:\\…\\Example Project' }]),
+    linkAll: async () => ({ added: 0, total: 0 }),
     openExternal: async () => {}, onAction: () => {},
   };
 }
@@ -71,9 +74,22 @@ async function renderDevices() {
 async function renderProjects() {
   const cfg = await window.api.getConfig();
   const list = $('#projectList');
-  if (!cfg.projects.length) { list.innerHTML = 'No projects linked yet.'; return; }
-  list.innerHTML = cfg.projects.map((p) =>
-    `<div class="card"><div class="kv"><span class="k">${p.name}</span><span class="v">${p.localPath}</span></div></div>`).join('');
+  list.innerHTML = cfg.projects.length
+    ? cfg.projects.map((p) => `<div class="card"><div class="kv"><span class="k">${p.name}</span><span class="v">${p.localPath}</span></div></div>`).join('')
+    : 'No projects linked yet.';
+  const discovered = await window.api.discover();
+  const dl = $('#discoverList');
+  dl.innerHTML = discovered.length
+    ? discovered.map((p) => `<div class="card"><div class="kv"><span class="k">${p.name}</span><span class="v">${p.localPath}</span></div></div>`).join('')
+    : 'None — all detected projects are linked.';
+  $('#addAll').disabled = discovered.length === 0;
+}
+
+function summarizeSync(res) {
+  const pushed = (res.push || []).reduce((a, r) => a + (r.pushed?.length || 0), 0);
+  if (res.pull?.blocked) return `Pushed ${pushed}. Pull skipped: ${res.pull.reason}`;
+  const pulled = (res.pull?.results || []).reduce((a, r) => a + (r.pulled?.length || 0), 0);
+  return `Pushed ${pushed}, pulled ${pulled} across all projects.`;
 }
 
 // ---- Schedule + Settings (two-way bound to config) ----
@@ -110,14 +126,26 @@ function bindSetting(id, key, kind = 'check') {
   bindSetting('awsDiscovery', 'awsDiscovery', 'value');
 
   $('#copyId').addEventListener('click', () => {
-    const txt = $('#thisDevice').textContent;
-    navigator.clipboard?.writeText(txt);
+    navigator.clipboard?.writeText($('#thisDevice').textContent);
   });
-  $('#syncNow').addEventListener('click', async () => {
-    $('#syncNow').textContent = 'Syncing…';
-    await window.api.push();
+
+  async function doSyncAll(btn) {
+    const labels = { '#syncNow': 'Sync all projects', '#syncAll': 'Sync all projects' };
+    const orig = btn.textContent;
+    btn.textContent = 'Syncing…'; btn.disabled = true;
+    const res = await window.api.syncAll();
+    $('#syncResult').textContent = summarizeSync(res);
     await renderStatus();
-    $('#syncNow').textContent = 'Sync now';
+    btn.textContent = orig; btn.disabled = false;
+  }
+  $('#syncNow').addEventListener('click', (e) => doSyncAll(e.target));
+  $('#syncAll').addEventListener('click', (e) => doSyncAll(e.target));
+  $('#addAll').addEventListener('click', async () => {
+    const discovered = await window.api.discover();
+    const r = await window.api.linkAll(discovered);
+    $('#syncResult').textContent = `Linked ${r.added} project(s).`;
+    await renderProjects();
+    await renderStatus();
   });
   window.api.onAction?.((name) => { if (name === 'sync-now') $('#syncNow').click(); });
 })();

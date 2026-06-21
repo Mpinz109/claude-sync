@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('api', {
   syncStatus: () => ipcRenderer.invoke('engine:syncStatus'),
   push: () => ipcRenderer.invoke('engine:push'),
   pull: (opts) => ipcRenderer.invoke('engine:pull', opts),
+  syncAll: (opts) => ipcRenderer.invoke('engine:syncAll', opts),
+  discover: () => ipcRenderer.invoke('engine:discover'),
+  linkAll: (list) => ipcRenderer.invoke('engine:linkAll', list),
   openExternal: (url) => ipcRenderer.invoke('engine:openExternal', url),
   onAction: (cb) => ipcRenderer.on('action', (_e, name) => cb(name)),
 });
