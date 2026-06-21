@@ -44,7 +44,7 @@ handles all of that and keeps multiple machines in sync.
 The engine is pure Node — no dependencies needed to run the CLI.
 
 ```bash
-git clone https://github.com/<you>/claude-sync
+git clone https://github.com/Mpinz109/claude-sync
 cd claude-sync
 
 node bin/claude-sync.js doctor                 # detect your Claude install + paths
