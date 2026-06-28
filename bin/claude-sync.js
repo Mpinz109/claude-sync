@@ -62,6 +62,7 @@ function adopt() {
   const r = adoptFromVault();
   for (const a of r.adopted) console.log(ok(`adopted "${a.name}" -> ${a.localPath}`));
   if (r.already.length) console.log(c.dim(`already linked: ${r.already.join(', ')}`));
+  if (r.duplicates?.length) console.log(warn(`skipped (same local folder already linked): ${r.duplicates.join(', ')}`));
   if (r.unmatched.length) console.log(warn(`no local folder found for: ${r.unmatched.join(', ')} (sync the files first, then re-run adopt)`));
 }
 
