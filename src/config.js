@@ -10,6 +10,19 @@ import { readJson, writeJson } from './util.js';
 export const CONFIG_DIR = path.join(os.homedir(), '.claude-sync');
 export const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 
+/**
+ * Canonicalize a path for equality comparison: absolute, forward-slashed, no
+ * trailing slash, and lowercased on case-insensitive filesystems (Windows,
+ * macOS). Use this whenever comparing two localPaths — raw string compare misses
+ * `C:\a` vs `C:/a` vs `C:\A`.
+ */
+export function normalizePath(p) {
+  if (!p) return '';
+  let r = path.resolve(p).replace(/[\\/]+/g, '/').replace(/\/+$/, '');
+  if (process.platform === 'win32' || process.platform === 'darwin') r = r.toLowerCase();
+  return r;
+}
+
 export const DEFAULT_SETTINGS = {
   autoMerge: false,             // auto-resolve conflicts by newest, loser kept as .fork
   autoMergeIfNoConflicts: true, // apply clean incoming changes without asking
@@ -70,9 +83,12 @@ export function addProject(name, localPath, gitRemote = '') {
 export function linkProjects(list) {
   const cfg = loadConfig();
   let added = 0;
+  const seen = new Set(cfg.projects.map((p) => normalizePath(p.localPath)));
   for (const { name, localPath, gitRemote = '' } of list) {
-    if (!cfg.projects.some((p) => p.localPath === localPath)) {
+    const np = normalizePath(localPath);
+    if (!seen.has(np)) {
       cfg.projects.push({ id: crypto.randomUUID(), name, localPath, gitRemote });
+      seen.add(np);
       added++;
     }
   }
