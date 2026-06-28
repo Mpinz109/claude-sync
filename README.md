@@ -39,6 +39,17 @@ handles all of that and keeps multiple machines in sync.
 - git (for syncing project files)
 - Syncthing (bundled by the app once packaging lands)
 
+## Install (desktop app)
+
+Grab the installer for your OS from the [Releases](https://github.com/Mpinz109/claude-sync/releases) page:
+
+- **Windows** — `ClaudeSync-<version>-setup.exe`
+- **macOS** — `.dmg`
+- **Linux** — `.AppImage`
+
+Each bundles Node, the engine, and Syncthing, so there's nothing else to install.
+(Installers are built per-OS by CI on every version tag; see `.github/workflows/build.yml`.)
+
 ## Quick start (CLI)
 
 The engine is pure Node — no dependencies needed to run the CLI.

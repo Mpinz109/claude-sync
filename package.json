@@ -11,7 +11,10 @@
     "app": "electron .",
     "cli": "node bin/claude-sync.js",
     "doctor": "node bin/claude-sync.js doctor",
-    "test": "node --test"
+    "test": "node --test",
+    "fetch-syncthing": "node scripts/fetch-syncthing.mjs",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir"
   },
   "keywords": ["claude", "claude-code", "sync", "syncthing", "backup", "electron", "cross-platform"],
   "author": "Maxwell Pinz",
@@ -23,7 +26,20 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "electron": "^31.0.0"
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.maxpinz.claudesync",
+    "productName": "Claude Sync",
+    "directories": { "output": "dist" },
+    "files": ["app/**/*", "src/**/*", "bin/**/*", "package.json"],
+    "extraResources": [
+      { "from": "vendor/syncthing/${os}", "to": "syncthing", "filter": ["**/*"] }
+    ],
+    "win": { "target": "nsis", "artifactName": "ClaudeSync-${version}-setup.${ext}" },
+    "mac": { "target": "dmg", "category": "public.app-category.developer-tools" },
+    "linux": { "target": "AppImage", "category": "Utility" }
   },
   "files": [
     "app",
