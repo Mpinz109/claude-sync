@@ -9,6 +9,7 @@ import { initVault } from '../src/vault.js';
 import { pushAll, pullAll, adoptFromVault, discoverProjects, status as syncStatus } from '../src/sync.js';
 import { gatherStatus } from '../src/status.js';
 import * as schedule from '../src/schedule.js';
+import * as gitsync from '../src/gitsync.js';
 import { c, ok, warn, bad } from '../src/util.js';
 
 const [, , cmd, ...args] = process.argv;
@@ -126,6 +127,30 @@ function scheduleCmd() {
   }
 }
 
+function filesCmd() {
+  const sub = args[0] || 'status';
+  const cfg = loadConfig();
+  if (!cfg.vaultDir) { console.log(bad('no vault — run init first')); return; }
+  const fn = { status: gitsync.filesStatus, push: gitsync.publish, pull: gitsync.integrate }[sub];
+  if (!fn) { console.log(bad('usage: claude-sync files status|push|pull')); return; }
+  if (!cfg.projects.length) { console.log(warn('no linked projects')); return; }
+  for (const p of cfg.projects) {
+    try {
+      const r = fn(cfg, p);
+      if (r.mode === 'none') { console.log(c.dim(`${r.project}: not a git repo`)); continue; }
+      if (sub === 'status') {
+        console.log(`${r.project}: ${r.mode}${r.branch ? ` @${r.branch}` : ''}${r.mode === 'bundle' ? c.dim(` (${r.peerBundles} peer bundle(s))`) : ''}`);
+      } else if (sub === 'push') {
+        console.log(ok(`${r.project}: ${r.mode === 'remote' ? `pushed ${r.pushed}` : `bundled -> ${path.basename(r.bundle)}`}`));
+      } else {
+        const conf = (r.conflicts || []).length;
+        const got = r.mode === 'remote' ? (r.fastForwarded ? 'fast-forwarded' : 'up to date / diverged') : `integrated ${r.integrated.length} peer(s)`;
+        console.log((conf ? warn : ok)(`${r.project}: ${got}${conf ? `, ${conf} conflict(s) left for manual merge` : ''}`));
+      }
+    } catch (e) { console.log(bad(`${p.name}: ${e.message.split('\n')[0]}`)); }
+  }
+}
+
 function help() {
   console.log(`${c.bold('claude-sync')} — sync Claude projects + history across computers
 
@@ -138,11 +163,12 @@ function help() {
   push                         local -> vault (safe, additive)
   pull [--yes] [--force]       vault -> local (dry-run unless --yes; needs Claude closed)
   schedule install|status|remove   daily push-only background job (settings.scheduleAt)
+  files status|push|pull       sync project FILES via git (remote ff, or vault bundles)
 
 GUI: \`npm run app\`.  Architecture: DESIGN.md.`);
 }
 
-const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, help, '--help': help, '-h': help };
+const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, help, '--help': help, '-h': help };
 
 (async () => {
   const fn = table[cmd] || (cmd ? () => { console.log(bad(`unknown command: ${cmd}`)); help(); } : help);
