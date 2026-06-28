@@ -96,8 +96,14 @@ async function renderProjects() {
 function summarizeSync(res) {
   const pushed = (res.push || []).reduce((a, r) => a + (r.pushed?.length || 0), 0);
   if (res.pull?.blocked) return `Pushed ${pushed}. Pull skipped: ${res.pull.reason}`;
-  const pulled = (res.pull?.results || []).reduce((a, r) => a + (r.pulled?.length || 0), 0);
-  return `Pushed ${pushed}, pulled ${pulled} across all projects.`;
+  const results = res.pull?.results || [];
+  const sum = (key) => results.reduce((a, r) => a + ((r[key]?.length) || 0), 0);
+  const pulled = sum('pulled'), forks = sum('forks'), conflicts = sum('conflicts'), available = sum('available');
+  let s = `Pushed ${pushed}, pulled ${pulled} across all projects.`;
+  if (forks) s += ` Auto-merged ${forks} conflict(s) (older copy kept as .fork).`;
+  if (conflicts) s += ` ${conflicts} unresolved conflict(s) — turn on auto-merge or resolve manually.`;
+  if (available) s += ` ${available} change(s) available, not applied.`;
+  return s;
 }
 
 // ---- Schedule + Settings (two-way bound to config) ----
