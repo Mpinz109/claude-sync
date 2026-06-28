@@ -44,26 +44,84 @@ export function pushProject(cfg, project, paths) {
   return { project: project.name, pushed, skipped };
 }
 
-/** vault -> local for one project. Writes Claude state, so Claude must be closed. */
+/** Hash a local session the same way push hashes vault sessions (tokenized). */
+function localSessionHash(localSession, home, projectRoot) {
+  return local.sha256(tokenize(local.readTranscript(localSession.transcriptPath), { home, projectRoot }));
+}
+
+/**
+ * vault -> local for one project. Writes Claude state, so Claude must be closed.
+ *
+ * Phase 5 conflict model. A session present in BOTH local and vault with the SAME
+ * contentHash is identical (skipped). DIFFERENT hash = conflict, resolved per
+ * settings:
+ *   - autoMerge=false                -> report in `conflicts`, change nothing.
+ *   - autoMerge=true                 -> newest by lastActivityAt wins; the loser is
+ *                                       preserved as `<id>.fork` (never destroyed).
+ * Sessions only in the vault are "clean incoming": applied when
+ * autoMergeIfNoConflicts !== false, otherwise reported in `available`.
+ */
 export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
   const home = paths.home;
+  const settings = cfg.settings || {};
+  const autoMerge = settings.autoMerge === true;
+  const applyClean = settings.autoMergeIfNoConflicts !== false; // default true
+
+  const recentsIndex = local.readRecentsIndex(paths);
+  const localById = new Map(
+    local.listLocalSessions(paths, project.localPath, recentsIndex).map((s) => [s.cliSessionId, s]),
+  );
   const sessions = vault.listVaultSessions(cfg.vaultDir, project.id);
-  const pulled = [], skipped = [], noRecents = [];
-  for (const { cliSessionId } of sessions) {
-    if (local.localHasSession(paths, project.localPath, cliSessionId)) { skipped.push(cliSessionId); continue; }
-    if (dryRun) { pulled.push(cliSessionId); continue; }
+  const pulled = [], skipped = [], noRecents = [], conflicts = [], forks = [], available = [];
+
+  // Write a vault session's transcript + recents locally, register the project.
+  const apply = (cliSessionId) => {
     const v = vault.readVaultSession(cfg.vaultDir, project.id, cliSessionId);
     const jsonl = detokenize(v.transcriptTokenized, { home, projectRoot: project.localPath });
     local.writeLocalTranscript(paths, project.localPath, cliSessionId, jsonl);
     if (v.recentsTokenized) {
       const entry = JSON.parse(detokenize(v.recentsTokenized, { home, projectRoot: project.localPath }));
-      const wrote = local.writeLocalRecents(paths, entry);
-      if (!wrote) noRecents.push(cliSessionId);
+      if (!local.writeLocalRecents(paths, entry)) noRecents.push(cliSessionId);
     }
     local.registerProject(paths, project.localPath);
-    pulled.push(cliSessionId);
+    return jsonl;
+  };
+
+  for (const { cliSessionId, meta } of sessions) {
+    const localS = localById.get(cliSessionId);
+
+    if (!localS) { // clean incoming
+      if (!applyClean) { available.push(cliSessionId); continue; }
+      if (dryRun) { pulled.push(cliSessionId); continue; }
+      apply(cliSessionId);
+      pulled.push(cliSessionId);
+      continue;
+    }
+
+    // Present on both sides — identical or conflict?
+    const localHash = localSessionHash(localS, home, project.localPath);
+    if (meta?.contentHash && meta.contentHash === localHash) { skipped.push(cliSessionId); continue; }
+
+    if (!autoMerge) { conflicts.push(cliSessionId); continue; } // report, change nothing
+    if (dryRun) { conflicts.push(cliSessionId); continue; }
+
+    // autoMerge: newest by lastActivityAt wins; keep the loser as <id>.fork.
+    const localLast = localS.recentsEntry?.lastActivityAt || 0;
+    const vaultLast = meta?.lastActivityAt || 0;
+    const v = vault.readVaultSession(cfg.vaultDir, project.id, cliSessionId);
+    const vaultJsonl = detokenize(v.transcriptTokenized, { home, projectRoot: project.localPath });
+    const localRaw = local.readTranscript(localS.transcriptPath);
+    if (vaultLast > localLast) {
+      local.writeLocalTranscriptFork(paths, project.localPath, cliSessionId, localRaw); // keep old local
+      apply(cliSessionId); // vault wins -> becomes the live transcript
+      forks.push({ cliSessionId, winner: 'vault', loserKeptAsFork: 'local' });
+      pulled.push(cliSessionId);
+    } else {
+      local.writeLocalTranscriptFork(paths, project.localPath, cliSessionId, vaultJsonl); // keep vault copy
+      forks.push({ cliSessionId, winner: 'local', loserKeptAsFork: 'vault' });
+    }
   }
-  return { project: project.name, pulled, skipped, noRecents };
+  return { project: project.name, pulled, skipped, noRecents, conflicts, forks, available };
 }
 
 export function pushAll(cfg = loadConfig(), paths = resolvePaths()) {
@@ -169,14 +227,28 @@ export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths(), { per
   return { adopted, unmatched, already, duplicates };
 }
 
-/** What would move, per project. */
+/** What would move, per project — including diverged sessions (conflicts). */
 export function status(cfg = loadConfig(), paths = resolvePaths()) {
   const recentsIndex = local.readRecentsIndex(paths);
   return cfg.projects.map((p) => {
-    const localIds = new Set(local.listLocalSessions(paths, p.localPath, recentsIndex).map((s) => s.cliSessionId));
-    const vaultIds = new Set(vault.listVaultSessions(cfg.vaultDir, p.id).map((s) => s.cliSessionId));
+    const localSessions = local.listLocalSessions(paths, p.localPath, recentsIndex);
+    const localById = new Map(localSessions.map((s) => [s.cliSessionId, s]));
+    const localIds = new Set(localById.keys());
+    const vaultSessions = vault.listVaultSessions(cfg.vaultDir, p.id);
+    const vaultIds = new Set(vaultSessions.map((s) => s.cliSessionId));
     const toPush = [...localIds].filter((id) => !vaultIds.has(id));
     const toPull = [...vaultIds].filter((id) => !localIds.has(id));
-    return { project: p.name, localPath: p.localPath, local: localIds.size, vault: vaultIds.size, toPush: toPush.length, toPull: toPull.length };
+    // Conflict = present in both with a different contentHash.
+    let conflicts = 0;
+    for (const vs of vaultSessions) {
+      const ls = localById.get(vs.cliSessionId);
+      if (!ls || !vs.meta?.contentHash) continue;
+      if (localSessionHash(ls, paths.home, p.localPath) !== vs.meta.contentHash) conflicts++;
+    }
+    return {
+      project: p.name, localPath: p.localPath,
+      local: localIds.size, vault: vaultIds.size,
+      toPush: toPush.length, toPull: toPull.length, conflicts,
+    };
   });
 }

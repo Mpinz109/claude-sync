@@ -83,6 +83,17 @@ export function writeLocalTranscript(paths, localPath, cliSessionId, jsonlText) 
   return file;
 }
 
+/**
+ * Preserve the losing side of a conflict next to the session as `<id>.fork`
+ * (NOT `.jsonl`, so Claude never loads it as a live session and listLocalSessions
+ * ignores it). Never destroy data — this is the keep-the-loser path.
+ */
+export function writeLocalTranscriptFork(paths, localPath, cliSessionId, jsonlText) {
+  const file = path.join(paths.transcriptsDir, encodeCwd(localPath), `${cliSessionId}.fork`);
+  writeText(file, jsonlText);
+  return file;
+}
+
 /** Write a recents entry (BOM-free) into the detected guid folder. Returns path or null. */
 export function writeLocalRecents(paths, entryObj) {
   const dir = detectRecentsTargetDir(paths);
