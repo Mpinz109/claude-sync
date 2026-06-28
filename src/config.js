@@ -30,6 +30,7 @@ export const DEFAULT_SETTINGS = {
   scheduleAt: '03:00',          // daily background job time
   schedulePushOnly: true,       // 3am job only publishes (safe, unattended)
   awsDiscovery: '',             // optional self-hosted Syncthing discovery/relay URL
+  projectsRoot: '',             // folder to scan for project folders during `adopt` (seeds a fresh machine)
 };
 
 function defaults() {

@@ -169,7 +169,7 @@ export function discoverProjects(paths = resolvePaths(), cfg = loadConfig()) {
  * those known projects, so bare on-disk folders that were never registered with
  * Claude are still matchable by name. First match for a name wins.
  */
-function localFolderIndex(paths, cfg) {
+function localFolderIndex(paths, cfg, extraRoot = null) {
   const index = new Map();
   const add = (name, p) => { if (name && p && !index.has(name)) index.set(name, p); };
   const discovered = discoverProjects(paths, cfg);
@@ -178,6 +178,13 @@ function localFolderIndex(paths, cfg) {
   const roots = new Set();
   for (const p of [...cfg.projects.map((x) => x.localPath), ...discovered.map((d) => d.localPath)]) {
     if (p) roots.add(path.dirname(path.resolve(p)));
+  }
+  // Explicit scan roots (the `adopt --root` flag and/or settings.projectsRoot).
+  // On a brand-new machine with no known projects to anchor off, this is the only
+  // way the on-disk scan finds anything. Scan each root AND its immediate subdirs'
+  // parent is itself, so projects living directly under the root are matched.
+  for (const r of [extraRoot, cfg.settings?.projectsRoot]) {
+    if (r && fs.existsSync(r)) roots.add(path.resolve(r));
   }
   for (const root of roots) {
     let names = [];
@@ -202,10 +209,10 @@ function localFolderIndex(paths, cfg) {
  * - BUG1 fix: never links two vault records to the same local folder (path-deduped,
  *   normalized for slash/case); extra records land in `duplicates`.
  */
-export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths(), { persist = true } = {}) {
+export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths(), { persist = true, root = null } = {}) {
   if (!cfg.vaultDir) throw new Error('No vault configured. Run init first.');
   const projectsDir = path.join(cfg.vaultDir, 'projects');
-  const byName = localFolderIndex(paths, cfg);
+  const byName = localFolderIndex(paths, cfg, root);
   const adopted = [], unmatched = [], already = [], duplicates = [];
   const claimed = new Set(cfg.projects.map((p) => normalizePath(p.localPath)));
   let ids = [];

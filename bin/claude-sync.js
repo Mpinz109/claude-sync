@@ -59,7 +59,10 @@ function linkAll() {
 function adopt() {
   const cfg = loadConfig();
   if (!cfg.vaultDir) { console.log(bad('no vault — run `claude-sync init --vault <folder>` first')); return; }
-  const r = adoptFromVault();
+  const i = args.indexOf('--root');
+  const root = i >= 0 ? path.resolve(args[i + 1]) : null;
+  if (root) { setSetting('projectsRoot', root); console.log(c.dim(`scan root set to ${root}`)); }
+  const r = adoptFromVault(undefined, undefined, { root });
   for (const a of r.adopted) console.log(ok(`adopted "${a.name}" -> ${a.localPath}`));
   if (r.already.length) console.log(c.dim(`already linked: ${r.already.join(', ')}`));
   if (r.duplicates?.length) console.log(warn(`skipped (same local folder already linked): ${r.duplicates.join(', ')}`));
@@ -112,7 +115,7 @@ function help() {
   init --vault <folder>        point at the shared vault folder
   link <name> <localPath>      track a project folder
   link-all                     auto-detect and link all local projects (first machine)
-  adopt                        on a 2nd machine: link the vault's projects to local folders (by name)
+  adopt [--root <dir>]         on a 2nd machine: link the vault's projects to local folders (by name; --root seeds the scan on a fresh machine)
   status                       what would push / pull
   push                         local -> vault (safe, additive)
   pull [--yes] [--force]       vault -> local (dry-run unless --yes; needs Claude closed)
