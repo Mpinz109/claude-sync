@@ -149,3 +149,12 @@ claude-sync schedule status | remove                      # inspect / unregister
 - `autoMergeIfNoConflicts` (bool, default true) — apply non-conflicting incoming changes without prompting (incl. in the scheduled job).
 - `promptOnOpen` (bool, default true) — run the pull prompt when Claude opens.
 - `scheduleAt` (HH:MM, default "03:00") and `schedulePushOnly` (bool, default true).
+
+## Known gaps / TODO
+
+- **adopt on a truly fresh machine has no scan root.** `adoptFromVault` matches vault
+  projects to local folders by scanning the *parents of already-known projects*. On a
+  brand-new machine with zero Claude history there is no anchor, so nothing is found.
+  Fix: add a `projectsRoot` config setting + `adopt --root <dir>` flag (and a GUI
+  field) to seed the scan root. (Flagged during two-machine testing; do after Phase 5
+  to avoid concurrent churn in `src/sync.js`.)
