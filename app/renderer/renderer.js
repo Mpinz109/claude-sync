@@ -10,7 +10,9 @@ if (!window.api) {
       projects: [], devices: [], settings: demoSettings,
     }),
     getConfig: async () => ({ projects: [], devices: [], settings: demoSettings }),
-    deviceId: async () => ({ deviceId: null, note: '(preview) — real Device ID appears once Syncthing is bundled' }),
+    deviceId: async () => ({ deviceId: 'PREVIEW-DEVICEID-NO-SYNCTHING' }),
+    pair: async () => ({ ok: true, devices: 2 }),
+    shareVault: async () => ({ ok: true }),
     setSetting: async () => {}, setVault: async () => {}, addProject: async () => {},
     push: async () => ({ ok: false }), pull: async () => ({ ok: false }),
     syncAll: async () => ({ push: [], pull: { blocked: false, results: [] } }),
@@ -66,8 +68,14 @@ async function renderStatus() {
 
 // ---- Devices ----
 async function renderDevices() {
+  $('#thisDevice').textContent = 'starting Syncthing…';
   const d = await window.api.deviceId();
-  $('#thisDevice').textContent = d.deviceId || d.note || 'unavailable';
+  $('#thisDevice').textContent = d.deviceId || ('unavailable: ' + (d.error || d.note || '?'));
+  const cfg = await window.api.getConfig();
+  const list = $('#deviceList');
+  list.innerHTML = (cfg.devices && cfg.devices.length)
+    ? cfg.devices.map((x) => `<div class="kv"><span class="k">${x.name}</span><span class="v mono">${x.syncthingId}</span></div>`).join('')
+    : 'None yet.';
 }
 
 // ---- Projects ----
@@ -127,6 +135,22 @@ function bindSetting(id, key, kind = 'check') {
 
   $('#copyId').addEventListener('click', () => {
     navigator.clipboard?.writeText($('#thisDevice').textContent);
+  });
+
+  $('#pairBtn')?.addEventListener('click', async () => {
+    const id = $('#pairId').value.trim();
+    if (!id) { $('#pairResult').textContent = 'Paste the other computer\'s Device ID first.'; return; }
+    $('#pairBtn').disabled = true; $('#pairResult').textContent = 'Pairing…';
+    const r = await window.api.pair(id, $('#pairName').value.trim());
+    $('#pairResult').textContent = r.ok ? `Paired. ${r.devices} device(s) known.` : `Failed: ${r.error}`;
+    $('#pairId').value = ''; $('#pairName').value = '';
+    $('#pairBtn').disabled = false;
+    await renderDevices();
+  });
+
+  $('#shareVaultBtn')?.addEventListener('click', async () => {
+    const r = await window.api.shareVault();
+    $('#pairResult').textContent = r.ok ? 'Vault shared with paired devices.' : `Share failed: ${r.error}`;
   });
 
   async function doSyncAll(btn) {
