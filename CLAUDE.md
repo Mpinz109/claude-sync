@@ -38,6 +38,12 @@ roadmap in DESIGN.md.
 5. **Recents tiles are just JSON files** in `claude-code-sessions/<acct>/<org>/`,
    read by the app — no LevelDB editing needed. The `<acct>/<org>` guid folders are
    the same across one account's machines.
+6. **OneDrive folders are reparse points.** `fs.readdirSync(dir, {withFileTypes:true})`
+   returns them as Dirents whose `isDirectory()` is **false** (they look like
+   symlinks), so any dir-scan that trusts `Dirent.isDirectory()` silently skips every
+   OneDrive-backed folder. Always `fs.statSync(full).isDirectory()` (it follows the
+   reparse). Project folders are frequently under OneDrive Desktop, so this matters
+   for every filesystem scan in the tool.
 
 ## Where things live
 
