@@ -41,13 +41,16 @@
         <div class="card">
           <div class="label">Pair a new computer</div>
           <div class="row">
-            <input id="pairId" placeholder="Paste the other computer's code" />
-            <button class="primary" disabled title="Enabled in phase 4">Pair</button>
+            <input id="pairId" placeholder="Paste the other computer's Device ID" />
+            <input id="pairName" placeholder="name (optional)" style="max-width:140px" />
+            <button id="pairBtn" class="primary">Pair</button>
           </div>
+          <span id="pairResult" class="muted small"></span>
         </div>
         <div class="card">
           <div class="label">Paired computers</div>
           <div id="deviceList" class="muted">None yet.</div>
+          <div class="row"><button id="shareVaultBtn" class="secondary">Share vault with paired</button></div>
         </div>
       </section>
 

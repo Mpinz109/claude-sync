@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('api', {
   setVault: (dir) => ipcRenderer.invoke('engine:setVault', dir),
   addProject: (name, localPath, gitRemote) => ipcRenderer.invoke('engine:addProject', name, localPath, gitRemote),
   deviceId: () => ipcRenderer.invoke('engine:deviceId'),
+  pair: (deviceId, name) => ipcRenderer.invoke('engine:pair', deviceId, name),
+  shareVault: () => ipcRenderer.invoke('engine:shareVault'),
   initVault: (dir) => ipcRenderer.invoke('engine:initVault', dir),
   syncStatus: () => ipcRenderer.invoke('engine:syncStatus'),
   push: () => ipcRenderer.invoke('engine:push'),

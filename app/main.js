@@ -8,6 +8,17 @@ import { gatherStatus } from '../src/status.js';
 import { loadConfig, saveConfig, setSetting, addProject, linkProjects } from '../src/config.js';
 import { initVault } from '../src/vault.js';
 import { pushAll, pullAll, syncAll, discoverProjects, adoptFromVault, status as syncStatus } from '../src/sync.js';
+import { Syncthing } from '../src/syncthing.js';
+
+// Lazy singleton: start the managed Syncthing on first need, reuse after.
+let _st = null;
+let _stStart = null;
+async function syncthing() {
+  if (!_st) _st = new Syncthing();
+  if (!_stStart) _stStart = _st.start().catch((e) => { _stStart = null; throw e; });
+  await _stStart;
+  return _st;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let win = null;
@@ -65,8 +76,32 @@ ipcMain.handle('engine:syncAll', (_e, opts) => syncAll(undefined, undefined, opt
 ipcMain.handle('engine:discover', () => discoverProjects());
 ipcMain.handle('engine:adopt', () => adoptFromVault());
 ipcMain.handle('engine:linkAll', (_e, list) => linkProjects(list));
-// Real Device ID lands with the Syncthing manager (phase 4):
-ipcMain.handle('engine:deviceId', () => ({ deviceId: null, note: 'Syncthing not bundled yet (phase 4)' }));
+// Syncthing-backed device identity + pairing (Phase 4 GUI):
+ipcMain.handle('engine:deviceId', async () => {
+  try { const st = await syncthing(); return { deviceId: await st.getDeviceId() }; }
+  catch (e) { return { deviceId: null, error: String(e.message || e) }; }
+});
+ipcMain.handle('engine:pair', async (_e, deviceId, name) => {
+  try {
+    const st = await syncthing();
+    await st.addDevice(deviceId.trim(), name);
+    const cfg = loadConfig();
+    if (!cfg.devices.some((d) => d.syncthingId === deviceId.trim())) {
+      cfg.devices.push({ name: name || deviceId.trim().slice(0, 7), syncthingId: deviceId.trim() });
+      saveConfig(cfg);
+    }
+    return { ok: true, devices: (await st.listDevices()).length };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
+ipcMain.handle('engine:shareVault', async () => {
+  try {
+    const cfg = loadConfig();
+    if (!cfg.vaultDir) return { ok: false, error: 'no vault set' };
+    const st = await syncthing();
+    await st.shareVault('claude-sync-vault', 'Claude Sync Vault', cfg.vaultDir, cfg.devices.map((d) => d.syncthingId));
+    return { ok: true };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
 
 app.whenReady().then(() => {
   createWindow();
