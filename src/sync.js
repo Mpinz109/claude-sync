@@ -144,7 +144,7 @@ function localFolderIndex(paths, cfg) {
  * - BUG1 fix: never links two vault records to the same local folder (path-deduped,
  *   normalized for slash/case); extra records land in `duplicates`.
  */
-export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths()) {
+export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths(), { persist = true } = {}) {
   if (!cfg.vaultDir) throw new Error('No vault configured. Run init first.');
   const projectsDir = path.join(cfg.vaultDir, 'projects');
   const byName = localFolderIndex(paths, cfg);
@@ -165,7 +165,7 @@ export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths()) {
     claimed.add(np);
     adopted.push({ name: pj.name, localPath });
   }
-  saveConfig(cfg);
+  if (persist) saveConfig(cfg);
   return { adopted, unmatched, already, duplicates };
 }
 
