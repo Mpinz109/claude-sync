@@ -1,6 +1,6 @@
 {
   "name": "claude-sync",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Keep Claude Code projects (files + conversation history) in sync across computers. Two-way, peer-to-peer (Syncthing), cross-platform, with a desktop GUI.",
   "type": "module",
   "main": "app/main.js",
@@ -13,7 +13,7 @@
     "doctor": "node bin/claude-sync.js doctor",
     "test": "node --test",
     "fetch-syncthing": "node scripts/fetch-syncthing.mjs",
-    "dist": "electron-builder",
+    "dist": "electron-builder --publish never",
     "dist:dir": "electron-builder --dir"
   },
   "keywords": ["claude", "claude-code", "sync", "syncthing", "backup", "electron", "cross-platform"],
