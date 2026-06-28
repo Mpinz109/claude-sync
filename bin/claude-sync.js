@@ -8,6 +8,7 @@ import { loadConfig, saveConfig, addProject, linkProjects, setSetting } from '..
 import { initVault } from '../src/vault.js';
 import { pushAll, pullAll, adoptFromVault, discoverProjects, status as syncStatus } from '../src/sync.js';
 import { gatherStatus } from '../src/status.js';
+import * as schedule from '../src/schedule.js';
 import { c, ok, warn, bad } from '../src/util.js';
 
 const [, , cmd, ...args] = process.argv;
@@ -108,6 +109,23 @@ async function pull() {
   if (dryRun) console.log(c.dim('\ndry run — re-run with `--yes` to apply (close Claude first).'));
 }
 
+function scheduleCmd() {
+  const sub = args[0];
+  const cfg = loadConfig();
+  if (sub === 'install') {
+    const r = schedule.install(cfg.settings || {});
+    console.log(ok(`scheduled daily push at ${r.when} (${r.platform})`));
+  } else if (sub === 'remove') {
+    schedule.remove();
+    console.log(ok('schedule removed'));
+  } else if (sub === 'status' || !sub) {
+    const s = schedule.status();
+    console.log(s.installed ? ok(`scheduled (${s.platform})${s.detail ? c.dim(' — ' + s.detail) : ''}`) : warn('no schedule installed'));
+  } else {
+    console.log(bad('usage: claude-sync schedule install|status|remove'));
+  }
+}
+
 function help() {
   console.log(`${c.bold('claude-sync')} — sync Claude projects + history across computers
 
@@ -119,11 +137,12 @@ function help() {
   status                       what would push / pull
   push                         local -> vault (safe, additive)
   pull [--yes] [--force]       vault -> local (dry-run unless --yes; needs Claude closed)
+  schedule install|status|remove   daily push-only background job (settings.scheduleAt)
 
 GUI: \`npm run app\`.  Architecture: DESIGN.md.`);
 }
 
-const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, help, '--help': help, '-h': help };
+const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, help, '--help': help, '-h': help };
 
 (async () => {
   const fn = table[cmd] || (cmd ? () => { console.log(bad(`unknown command: ${cmd}`)); help(); } : help);
