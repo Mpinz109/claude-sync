@@ -71,9 +71,10 @@ function statusCmd() {
   if (!cfg.vaultDir) { console.log(warn('no vault set — run `claude-sync init --vault <folder>`')); return; }
   const rows = syncStatus();
   if (!rows.length) { console.log(warn('no linked projects — run `claude-sync link <name> <path>`')); return; }
-  console.log(c.bold('\nproject                         local  vault  →push  ←pull'));
+  console.log(c.bold('\nproject                         local  vault  →push  ←pull  ⚠conf'));
   for (const r of rows) {
-    console.log(`${r.project.padEnd(30).slice(0, 30)}  ${String(r.local).padStart(5)}  ${String(r.vault).padStart(5)}  ${String(r.toPush).padStart(5)}  ${String(r.toPull).padStart(5)}`);
+    const conf = r.conflicts ? c.yellow(String(r.conflicts).padStart(5)) : String(r.conflicts ?? 0).padStart(5);
+    console.log(`${r.project.padEnd(30).slice(0, 30)}  ${String(r.local).padStart(5)}  ${String(r.vault).padStart(5)}  ${String(r.toPush).padStart(5)}  ${String(r.toPull).padStart(5)}  ${conf}`);
   }
   console.log('');
 }
@@ -90,8 +91,16 @@ async function pull() {
   const res = await pullAll(undefined, undefined, { dryRun, force: args.includes('--force') });
   if (res.blocked) { console.log(warn(res.reason)); return; }
   for (const r of res.results) {
-    if (dryRun) console.log(`${r.project}: ${r.pulled.length} would be pulled`);
-    else console.log(ok(`${r.project}: pulled ${r.pulled.length}, already local ${r.skipped.length}` + (r.noRecents.length ? c.dim(` (${r.noRecents.length} without a tile)`) : '')));
+    if (dryRun) {
+      console.log(`${r.project}: ${r.pulled.length} would be pulled` + (r.conflicts.length ? warn(`, ${r.conflicts.length} conflict(s)`) : ''));
+    } else {
+      let line = `${r.project}: pulled ${r.pulled.length}, already local ${r.skipped.length}`;
+      if (r.noRecents.length) line += c.dim(` (${r.noRecents.length} without a tile)`);
+      console.log(ok(line));
+      if (r.forks?.length) console.log(c.dim(`  resolved ${r.forks.length} conflict(s); loser kept as <id>.fork: ${r.forks.map((f) => f.cliSessionId.slice(0, 8)).join(', ')}`));
+      if (r.conflicts?.length) console.log(warn(`  ${r.conflicts.length} unresolved conflict(s) (autoMerge off): ${r.conflicts.map((id) => id.slice(0, 8)).join(', ')}`));
+      if (r.available?.length) console.log(c.dim(`  ${r.available.length} available, not applied (autoMergeIfNoConflicts off)`));
+    }
   }
   if (dryRun) console.log(c.dim('\ndry run — re-run with `--yes` to apply (close Claude first).'));
 }
