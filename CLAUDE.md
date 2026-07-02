@@ -11,14 +11,24 @@ fast on-ramp; DESIGN.md is the source of truth for design.
 
 ## Current status
 
-Working and verified: the cross-platform path engine, BOM-safe IO, config store,
-the canonical vault, path tokenization, and the **history round-trip**
-(`push`/`pull`/`status`, union by `cliSessionId`, byte-exact round-trip). The
-Electron GUI shell exists (Status live; Devices/Projects/Schedule/Settings wired
-over IPC). CLI: `doctor, init, link, link-all, adopt, status, push, pull`.
+**v0.1.1 SHIPPED 2026-06-28** — public GitHub Release with Win/mac/Linux
+installers, CI green. All roadmap phases (1–8) are done, built by two Claude
+sessions (laptop + desktop) coordinating over a LAN relay. Since the release,
+merged to main: per-project sync switch + primary/secondary machine roles
+(`feature/project-controls`), duplicate-project fixes + `tidy` command
+(`feature/tidy`), and agent messaging — relay engine + MCP server
+(`feature/agent-relay`). Test suite: 65 zero-dep `node --test` tests.
 
-Phases 1–3 + sync-all/adopt are done. **Next up is Phase 4 (Syncthing).** See the
-roadmap in DESIGN.md.
+CLI: `doctor, init, link, link-all, adopt [--root], status, push, pull,
+schedule, files, project, role, tidy, relay`. MCP server:
+`bin/claude-sync-mcp.js` (send_message/read_messages/list_peers over the relay).
+
+**Open follow-ups (mostly GUI lane):** Projects-tab per-project on/off toggles;
+Settings role picker; Tidy button; surface pull conflicts/forks/available in
+the pull view; promptOnOpen GUI prompt; optional Messages screen for the agent
+relay; **v0.1.2 release** (the shipped v0.1.1 build predates the duplicate-
+project fixes) — releases need Max's direct approval. Engine ideas: timestamped
+`.fork`s, code signing (paid, Max's call).
 
 ## Non-negotiable facts (these were learned painfully — do not relearn them)
 
@@ -57,7 +67,12 @@ roadmap in DESIGN.md.
 | `src/local.js` | read/write this machine's transcripts, recents, registration |
 | `src/sync.js` | `push/pull/status/syncAll/discoverProjects/adoptFromVault` |
 | `src/status.js` | structured status for CLI `doctor` + GUI |
-| `src/syncthing.js` | **skeleton** — Phase 4 fills this in |
+| `src/syncthing.js` | managed private Syncthing: identity, pairing, vault share (REST) |
+| `src/schedule.js` | per-OS daily background job (Task Scheduler / launchd / cron) |
+| `src/gitsync.js` | project FILE sync via git: remote ff, or bundles through the vault |
+| `src/maintain.js` | `tidy`: dead/variant registration cleanup + vault record dedupe |
+| `src/relay.js` | agent message relay (LAN HTTP, token, persistent history) |
+| `bin/claude-sync-mcp.js` | MCP stdio server: agent messaging as native Claude tools |
 | `bin/claude-sync.js` | the CLI |
 | `app/main.js` | Electron main = the engine over IPC |
 | `app/preload.cjs` | IPC bridge (CommonJS on purpose) |
