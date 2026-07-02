@@ -10,9 +10,8 @@ import { tokenize, detokenize } from './tokens.js';
 import * as vault from './vault.js';
 import * as local from './local.js';
 
-function ctx(cfg, paths) {
-  return { home: paths.home, machineId: cfg.machineId, machineName: cfg.machineName, vaultDir: cfg.vaultDir };
-}
+/** Per-project sync switch: absent means enabled (back-compat). */
+const syncable = (p) => p.syncEnabled !== false;
 
 /** local -> vault for one project. Safe to run with Claude open (read-only locally). */
 export function pushProject(cfg, project, paths) {
@@ -60,12 +59,20 @@ function localSessionHash(localSession, home, projectRoot) {
  *                                       preserved as `<id>.fork` (never destroyed).
  * Sessions only in the vault are "clean incoming": applied when
  * autoMergeIfNoConflicts !== false, otherwise reported in `available`.
+ *
+ * Primary/secondary: when a machine is registered as `primary` in the vault, it
+ * is the source of truth — on an autoMerge conflict the primary's version wins
+ * regardless of timestamps (the loser is still kept as a `.fork`, never lost).
  */
 export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
   const home = paths.home;
   const settings = cfg.settings || {};
   const autoMerge = settings.autoMerge === true;
   const applyClean = settings.autoMergeIfNoConflicts !== false; // default true
+
+  let primaryId = null;
+  try { primaryId = vault.getPrimaryMachineId(cfg.vaultDir); } catch { /* no vault meta */ }
+  const iAmPrimary = !!primaryId && primaryId === cfg.machineId;
 
   const recentsIndex = local.readRecentsIndex(paths);
   const localById = new Map(
@@ -105,13 +112,18 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
     if (!autoMerge) { conflicts.push(cliSessionId); continue; } // report, change nothing
     if (dryRun) { conflicts.push(cliSessionId); continue; }
 
-    // autoMerge: newest by lastActivityAt wins; keep the loser as <id>.fork.
+    // autoMerge: primary (if declared) wins outright; otherwise newest by
+    // lastActivityAt. The loser is always kept as <id>.fork.
     const localLast = localS.recentsEntry?.lastActivityAt || 0;
     const vaultLast = meta?.lastActivityAt || 0;
+    let vaultWins;
+    if (iAmPrimary) vaultWins = false;                                        // this machine is the source of truth
+    else if (primaryId && meta?.originMachineId === primaryId) vaultWins = true; // incoming is the primary's version
+    else vaultWins = vaultLast > localLast;                                   // no roles: newest wins
     const v = vault.readVaultSession(cfg.vaultDir, project.id, cliSessionId);
     const vaultJsonl = detokenize(v.transcriptTokenized, { home, projectRoot: project.localPath });
     const localRaw = local.readTranscript(localS.transcriptPath);
-    if (vaultLast > localLast) {
+    if (vaultWins) {
       local.writeLocalTranscriptFork(paths, project.localPath, cliSessionId, localRaw); // keep old local
       apply(cliSessionId); // vault wins -> becomes the live transcript
       forks.push({ cliSessionId, winner: 'vault', loserKeptAsFork: 'local' });
@@ -127,8 +139,8 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
 export function pushAll(cfg = loadConfig(), paths = resolvePaths()) {
   if (!cfg.vaultDir) throw new Error('No vault configured. Run init first.');
   vault.initVault(cfg.vaultDir);
-  vault.registerMachine(cfg.vaultDir, cfg.machineId, cfg.machineName);
-  return cfg.projects.map((p) => pushProject(cfg, p, paths));
+  vault.registerMachine(cfg.vaultDir, cfg.machineId, cfg.machineName, cfg.settings?.machineRole || '');
+  return cfg.projects.filter(syncable).map((p) => pushProject(cfg, p, paths));
 }
 
 export async function pullAll(cfg = loadConfig(), paths = resolvePaths(), { dryRun = false, force = false } = {}) {
@@ -136,7 +148,7 @@ export async function pullAll(cfg = loadConfig(), paths = resolvePaths(), { dryR
   if (!dryRun && !force && await claudeRunning()) {
     return { blocked: true, reason: 'Claude is running. Close it before pulling (it rewrites its own state on launch/quit).' };
   }
-  return { blocked: false, results: cfg.projects.map((p) => pullProject(cfg, p, paths, { dryRun })) };
+  return { blocked: false, results: cfg.projects.filter(syncable).map((p) => pullProject(cfg, p, paths, { dryRun })) };
 }
 
 /** Full sync of every linked project: push, then (Claude-closed) pull. */
@@ -216,7 +228,11 @@ export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths(), { per
   const adopted = [], unmatched = [], already = [], duplicates = [];
   const claimed = new Set(cfg.projects.map((p) => normalizePath(p.localPath)));
   let ids = [];
-  try { ids = fs.readdirSync(projectsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name); } catch { /* none */ }
+  // Rule #6: the vault may live under OneDrive — statSync, never Dirent.isDirectory().
+  try {
+    ids = fs.readdirSync(projectsDir)
+      .filter((name) => { try { return fs.statSync(path.join(projectsDir, name)).isDirectory(); } catch { return false; } });
+  } catch { /* none */ }
   for (const id of ids) {
     const pj = readJson(path.join(projectsDir, id, 'project.json'), null);
     if (!pj) continue;
@@ -238,6 +254,9 @@ export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths(), { per
 export function status(cfg = loadConfig(), paths = resolvePaths()) {
   const recentsIndex = local.readRecentsIndex(paths);
   return cfg.projects.map((p) => {
+    if (!syncable(p)) {
+      return { project: p.name, localPath: p.localPath, enabled: false, local: 0, vault: 0, toPush: 0, toPull: 0, conflicts: 0 };
+    }
     const localSessions = local.listLocalSessions(paths, p.localPath, recentsIndex);
     const localById = new Map(localSessions.map((s) => [s.cliSessionId, s]));
     const localIds = new Set(localById.keys());
@@ -253,7 +272,7 @@ export function status(cfg = loadConfig(), paths = resolvePaths()) {
       if (localSessionHash(ls, paths.home, p.localPath) !== vs.meta.contentHash) conflicts++;
     }
     return {
-      project: p.name, localPath: p.localPath,
+      project: p.name, localPath: p.localPath, enabled: true,
       local: localIds.size, vault: vaultIds.size,
       toPush: toPush.length, toPull: toPull.length, conflicts,
     };

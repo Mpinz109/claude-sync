@@ -22,11 +22,31 @@ export function loadVaultMeta(dir) {
   return readJson(path.join(dir, 'vault.json'));
 }
 
-export function registerMachine(dir, machineId, machineName) {
+export function registerMachine(dir, machineId, machineName, role = '') {
   const f = path.join(dir, 'vault.json');
   const m = readJson(f);
-  m.machines[machineId] = { name: machineName, lastSeen: null };
+  const prev = m.machines[machineId] || {};
+  m.machines[machineId] = { ...prev, name: machineName, lastSeen: null };
+  if (role) {
+    m.machines[machineId].role = role;
+    // Single-primary invariant: claiming primary demotes any other primary.
+    if (role === 'primary') {
+      for (const [id, rec] of Object.entries(m.machines)) {
+        if (id !== machineId && rec.role === 'primary') rec.role = 'secondary';
+      }
+    }
+  }
   writeJson(f, m);
+}
+
+/** The machineId currently registered as primary in this vault, or null. */
+export function getPrimaryMachineId(dir) {
+  const m = readJson(path.join(dir, 'vault.json'), null);
+  if (!m) return null;
+  for (const [id, rec] of Object.entries(m.machines || {})) {
+    if (rec.role === 'primary') return id;
+  }
+  return null;
 }
 
 function projDir(dir, projectId) { return path.join(dir, 'projects', projectId); }
@@ -55,9 +75,11 @@ export function vaultHasSession(dir, projectId, cliSessionId) {
 export function listVaultSessions(dir, projectId) {
   const base = path.join(projDir(dir, projectId), 'sessions');
   try {
-    return fs.readdirSync(base, { withFileTypes: true })
-      .filter((d) => d.isDirectory())
-      .map((d) => ({ cliSessionId: d.name, meta: readJson(path.join(base, d.name, 'meta.json'), {}) }));
+    // Rule #6: the vault may live under OneDrive, where entries are reparse
+    // points and Dirent.isDirectory() lies — statSync each entry instead.
+    return fs.readdirSync(base)
+      .filter((name) => { try { return fs.statSync(path.join(base, name)).isDirectory(); } catch { return false; } })
+      .map((name) => ({ cliSessionId: name, meta: readJson(path.join(base, name, 'meta.json'), {}) }));
   } catch { return []; }
 }
 

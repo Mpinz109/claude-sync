@@ -31,6 +31,7 @@ export const DEFAULT_SETTINGS = {
   schedulePushOnly: true,       // 3am job only publishes (safe, unattended)
   awsDiscovery: '',             // optional self-hosted Syncthing discovery/relay URL
   projectsRoot: '',             // folder to scan for project folders during `adopt` (seeds a fresh machine)
+  machineRole: '',              // '' | 'primary' | 'secondary' — primary is the source of truth on conflicts
 };
 
 function defaults() {
@@ -53,7 +54,26 @@ export function loadConfig() {
   }
   const cfg = readJson(CONFIG_FILE);
   cfg.settings = { ...DEFAULT_SETTINGS, ...(cfg.settings || {}) }; // fill new keys
+  // Back-compat: projects linked before per-project sync existed are enabled.
+  cfg.projects = (cfg.projects || []).map((p) => ({ ...p, syncEnabled: p.syncEnabled !== false }));
   return cfg;
+}
+
+/** Find a linked project by name (case-insensitive) or by local path. */
+export function findProject(cfg, key) {
+  const nk = normalizePath(key);
+  const lk = String(key).toLowerCase();
+  return cfg.projects.find((p) => p.name.toLowerCase() === lk || normalizePath(p.localPath) === nk) || null;
+}
+
+/** Turn syncing on/off for one linked project. Returns the project or null. */
+export function setProjectSync(key, enabled) {
+  const cfg = loadConfig();
+  const p = findProject(cfg, key);
+  if (!p) return null;
+  p.syncEnabled = !!enabled;
+  saveConfig(cfg);
+  return p;
 }
 
 export function saveConfig(cfg) {
@@ -75,7 +95,7 @@ export function setSetting(key, value) {
 export function addProject(name, localPath, gitRemote = '') {
   const cfg = loadConfig();
   const id = crypto.randomUUID();
-  cfg.projects.push({ id, name, localPath, gitRemote });
+  cfg.projects.push({ id, name, localPath, gitRemote, syncEnabled: true });
   saveConfig(cfg);
   return id;
 }
@@ -88,7 +108,7 @@ export function linkProjects(list) {
   for (const { name, localPath, gitRemote = '' } of list) {
     const np = normalizePath(localPath);
     if (!seen.has(np)) {
-      cfg.projects.push({ id: crypto.randomUUID(), name, localPath, gitRemote });
+      cfg.projects.push({ id: crypto.randomUUID(), name, localPath, gitRemote, syncEnabled: true });
       seen.add(np);
       added++;
     }
