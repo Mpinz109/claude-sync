@@ -8,6 +8,7 @@ import { loadConfig, saveConfig, addProject, linkProjects, setSetting, setProjec
 import { initVault, registerMachine } from '../src/vault.js';
 import { pushAll, pullAll, adoptFromVault, discoverProjects, status as syncStatus } from '../src/sync.js';
 import { gatherStatus } from '../src/status.js';
+import { tidyRegistration, dedupeVault } from '../src/maintain.js';
 import * as schedule from '../src/schedule.js';
 import * as gitsync from '../src/gitsync.js';
 import { c, ok, warn, bad } from '../src/util.js';
@@ -131,6 +132,50 @@ function scheduleCmd() {
   }
 }
 
+async function tidy() {
+  const apply = args.includes('--yes');
+  const cfg = loadConfig();
+
+  // 1) vault: merge duplicate project records (safe while Claude runs).
+  if (cfg.vaultDir) {
+    const r = dedupeVault(cfg, { apply });
+    if (!r.merged.length) console.log(ok('vault: no duplicate project records'));
+    for (const m of r.merged) {
+      console.log((apply ? ok : warn)(`vault: "${m.name}" ${apply ? 'merged' : 'would merge'} ${m.moved.length} session(s) from ${m.retired.slice(0, 8)} into ${m.canonical.slice(0, 8)}`));
+      if (m.skipped.length) console.log(warn(`  ${m.skipped.length} session id(s) exist in both records — left in place, resolve via pull conflicts`));
+    }
+    if (apply && r.repointed.length) { saveConfig(cfg); console.log(c.dim(`  relinked locally: ${r.repointed.join(', ')}`)); }
+  } else {
+    console.log(c.dim('vault: not configured, skipping'));
+  }
+
+  // 2) linked paths: normalize to native separators. Not cosmetic — tokenize()
+  // matches the project root as a raw string, so a forward-slash root fails to
+  // tokenize the backslash paths inside real transcripts and leaks them.
+  const cfgNative = { ...cfg, projects: cfg.projects.map((p) => ({ ...p, localPath: path.resolve(p.localPath) })) };
+  let cfgChanged = false;
+  for (let i = 0; i < cfg.projects.length; i++) {
+    if (cfgNative.projects[i].localPath !== cfg.projects[i].localPath) {
+      cfgChanged = true;
+      console.log((apply ? ok : warn)(`config: ${apply ? 'normalized' : 'would normalize'} linked path for "${cfg.projects[i].name}" to native separators`));
+    }
+  }
+  if (apply && cfgChanged) saveConfig(cfgNative);
+
+  // 3) .claude.json registration (writing Claude state needs Claude closed).
+  const running = await claudeRunning();
+  if (apply && running && !args.includes('--force')) {
+    console.log(warn('registration: skipped — Claude is running (close it and re-run, or --force)'));
+  } else {
+    const r = tidyRegistration(undefined, { apply, cfg: cfgNative });
+    if (!r.removed.length && !r.merged.length && !r.rekeyed.length) console.log(ok('registration: clean'));
+    for (const k of r.removed) console.log((apply ? ok : warn)(`registration: ${apply ? 'removed' : 'would remove'} dead entry ${c.dim(k)}`));
+    for (const k of r.merged) console.log((apply ? ok : warn)(`registration: ${apply ? 'merged' : 'would merge'} duplicate ${c.dim(k)}`));
+    for (const k of r.rekeyed) console.log((apply ? ok : warn)(`registration: ${apply ? 'rekeyed' : 'would rekey'} ${c.dim(k.from)} -> ${c.dim(k.to)}`));
+  }
+  if (!apply) console.log(c.dim('\ndry run — re-run with `claude-sync tidy --yes` to apply.'));
+}
+
 function projectCmd() {
   const sub = args[0] || 'list';
   const cfg = loadConfig();
@@ -216,11 +261,12 @@ function help() {
   files status|push|pull       sync project FILES via git (remote ff, or vault bundles)
   project [list|on|off <name>]  per-project sync switch (off = excluded from push/pull/status)
   role [primary|secondary|clear]  make this machine the source of truth on conflicts (or defer)
+  tidy [--yes]                 fix duplicate projects: merge dup vault records, clean dead/variant registrations
 
 GUI: \`npm run app\`.  Architecture: DESIGN.md.`);
 }
 
-const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, help, '--help': help, '-h': help };
+const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, tidy, help, '--help': help, '-h': help };
 
 (async () => {
   const fn = table[cmd] || (cmd ? () => { console.log(bad(`unknown command: ${cmd}`)); help(); } : help);

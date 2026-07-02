@@ -160,19 +160,24 @@ export async function syncAll(cfg = loadConfig(), paths = resolvePaths(), { forc
 
 /** Discover local Claude projects not yet linked (from .claude.json + recents cwds). */
 export function discoverProjects(paths = resolvePaths(), cfg = loadConfig()) {
-  const linked = new Set(cfg.projects.map((p) => p.localPath));
-  const found = new Map(); // localPath -> name
+  // Compare NORMALIZED paths: a slash/case variant of a linked path (e.g. the
+  // registration key C:/Users/... vs the linked C:\Users\...) is the SAME
+  // project — raw-string compare made it show up as "detected (not linked)"
+  // right next to its linked twin in the GUI Projects tab.
+  const linked = new Set(cfg.projects.map((p) => normalizePath(p.localPath)));
+  const found = new Map(); // normalizedPath -> { name, localPath }
+  const consider = (p) => {
+    if (!p) return;
+    const np = normalizePath(p);
+    if (linked.has(np) || found.has(np)) return;
+    if (fs.existsSync(p)) found.set(np, { name: path.basename(p), localPath: p });
+  };
   try {
     const j = readJson(paths.claudeJson, {});
-    for (const p of Object.keys(j.projects || {})) {
-      if (!linked.has(p) && fs.existsSync(p)) found.set(p, path.basename(p));
-    }
+    for (const p of Object.keys(j.projects || {})) consider(p);
   } catch { /* no registration */ }
-  for (const { entry } of local.readRecentsIndex(paths).values()) {
-    const cwd = entry.cwd;
-    if (cwd && !linked.has(cwd) && fs.existsSync(cwd)) found.set(cwd, path.basename(cwd));
-  }
-  return [...found].map(([localPath, name]) => ({ name, localPath }));
+  for (const { entry } of local.readRecentsIndex(paths).values()) consider(entry.cwd);
+  return [...found.values()];
 }
 
 /**

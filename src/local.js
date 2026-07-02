@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { encodeCwd } from './platform.js';
+import { normalizePath } from './config.js';
 import { readJson, writeJson, writeText, readText } from './util.js';
 
 const TRUSTED_PROJECT = {
@@ -109,10 +110,11 @@ export function registerProject(paths, localPath) {
   const file = paths.claudeJson;
   const cfg = fs.existsSync(file) ? readJson(file) : {};
   cfg.projects = cfg.projects || {};
-  if (!cfg.projects[localPath]) {
-    cfg.projects[localPath] = { ...TRUSTED_PROJECT };
-    writeJson(file, cfg);
-    return true;
-  }
-  return false;
+  // Compare normalized, not raw: a slash/case variant of an existing key would
+  // otherwise register the same project twice (the app then lists it twice).
+  const np = normalizePath(localPath);
+  if (Object.keys(cfg.projects).some((k) => normalizePath(k) === np)) return false;
+  cfg.projects[localPath] = { ...TRUSTED_PROJECT };
+  writeJson(file, cfg);
+  return true;
 }
