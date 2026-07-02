@@ -1,20 +1,25 @@
 // Structured health/status, shared by the CLI `doctor` and the GUI Status screen.
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { resolvePaths, findBundledCli, claudeRunning } from './platform.js';
 import { loadConfig } from './config.js';
 
+// Rule #6: statSync, never Dirent.isDirectory() — these dirs can live under
+// OneDrive (reparse points), where Dirent lies and folders get skipped.
+function isDir(p) { try { return fs.statSync(p).isDirectory(); } catch { return false; } }
+
 function countSubdirs(dir) {
-  try { return fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory()).length; }
+  try { return fs.readdirSync(dir).filter((n) => isDir(path.join(dir, n))).length; }
   catch { return null; }
 }
 function countJsonDeep(dir) {
   let n = 0;
   const walk = (d) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const full = `${d}/${e.name}`;
-      if (e.isDirectory()) walk(full);
-      else if (e.name.endsWith('.json')) n++;
+    for (const name of fs.readdirSync(d)) {
+      const full = path.join(d, name);
+      if (isDir(full)) walk(full);
+      else if (name.endsWith('.json')) n++;
     }
   };
   try { walk(dir); return n; } catch { return null; }

@@ -4,8 +4,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolvePaths, findBundledCli, claudeRunning } from '../src/platform.js';
-import { loadConfig, saveConfig, addProject, linkProjects, setSetting } from '../src/config.js';
-import { initVault } from '../src/vault.js';
+import { loadConfig, saveConfig, addProject, linkProjects, setSetting, setProjectSync } from '../src/config.js';
+import { initVault, registerMachine } from '../src/vault.js';
 import { pushAll, pullAll, adoptFromVault, discoverProjects, status as syncStatus } from '../src/sync.js';
 import { gatherStatus } from '../src/status.js';
 import * as schedule from '../src/schedule.js';
@@ -18,7 +18,7 @@ async function doctor() {
   const s = await gatherStatus();
   console.log(c.bold('\nclaude-sync doctor\n'));
   console.log(`${c.dim('platform')}      ${s.platform}`);
-  console.log(`${c.dim('machine')}       ${s.machineName} ${c.dim(`(${s.machineId.slice(0, 8)})`)}`);
+  console.log(`${c.dim('machine')}       ${s.machineName} ${c.dim(`(${s.machineId.slice(0, 8)})`)}${s.settings?.machineRole ? `  ${c.cyan(s.settings.machineRole)}` : ''}`);
   console.log(`${c.dim('app data')}      ${s.appDataBase}`);
   console.log(`${c.dim('vault')}         ${s.vaultDir || c.dim('(not set — run `claude-sync init`)')}`);
   console.log('');
@@ -78,6 +78,10 @@ function statusCmd() {
   if (!rows.length) { console.log(warn('no linked projects — run `claude-sync link <name> <path>`')); return; }
   console.log(c.bold('\nproject                         local  vault  →push  ←pull  ⚠conf'));
   for (const r of rows) {
+    if (r.enabled === false) {
+      console.log(c.dim(`${r.project.padEnd(30).slice(0, 30)}  (sync off)`));
+      continue;
+    }
     const conf = r.conflicts ? c.yellow(String(r.conflicts).padStart(5)) : String(r.conflicts ?? 0).padStart(5);
     console.log(`${r.project.padEnd(30).slice(0, 30)}  ${String(r.local).padStart(5)}  ${String(r.vault).padStart(5)}  ${String(r.toPush).padStart(5)}  ${String(r.toPull).padStart(5)}  ${conf}`);
   }
@@ -127,6 +131,52 @@ function scheduleCmd() {
   }
 }
 
+function projectCmd() {
+  const sub = args[0] || 'list';
+  const cfg = loadConfig();
+  if (sub === 'list') {
+    if (!cfg.projects.length) { console.log(warn('no linked projects')); return; }
+    for (const p of cfg.projects) {
+      const state = p.syncEnabled !== false ? c.green('on ') : c.yellow('off');
+      console.log(`  [${state}] ${p.name.padEnd(32).slice(0, 32)} ${c.dim(p.localPath)}`);
+    }
+    return;
+  }
+  if (sub === 'on' || sub === 'off') {
+    const key = args.slice(1).join(' ');
+    if (!key) { console.log(bad(`usage: claude-sync project ${sub} <name-or-path>`)); return; }
+    const p = setProjectSync(key, sub === 'on');
+    if (!p) { console.log(bad(`no linked project matches "${key}" (try \`claude-sync project list\`)`)); return; }
+    console.log(ok(`sync ${sub} for "${p.name}"`));
+    return;
+  }
+  console.log(bad('usage: claude-sync project [list] | project on <name> | project off <name>'));
+}
+
+function roleCmd() {
+  const sub = args[0];
+  const cfg = loadConfig();
+  if (!sub) {
+    const r = cfg.settings.machineRole;
+    console.log(r ? `machine role: ${c.bold(r)}` : 'machine role: (none) — set with `claude-sync role primary|secondary`');
+    return;
+  }
+  if (!['primary', 'secondary', 'clear'].includes(sub)) {
+    console.log(bad('usage: claude-sync role [primary|secondary|clear]'));
+    return;
+  }
+  const val = sub === 'clear' ? '' : sub;
+  setSetting('machineRole', val);
+  if (cfg.vaultDir && val) {
+    registerMachine(cfg.vaultDir, cfg.machineId, cfg.machineName, val);
+    console.log(ok(`this machine is now ${c.bold(val)}${val === 'primary' ? ' — the source of truth on conflicts (any other primary was demoted)' : ''}`));
+  } else if (val) {
+    console.log(ok(`role set to ${val} (no vault yet — it will register on the next push)`));
+  } else {
+    console.log(ok('role cleared'));
+  }
+}
+
 function filesCmd() {
   const sub = args[0] || 'status';
   const cfg = loadConfig();
@@ -164,11 +214,13 @@ function help() {
   pull [--yes] [--force]       vault -> local (dry-run unless --yes; needs Claude closed)
   schedule install|status|remove   daily push-only background job (settings.scheduleAt)
   files status|push|pull       sync project FILES via git (remote ff, or vault bundles)
+  project [list|on|off <name>]  per-project sync switch (off = excluded from push/pull/status)
+  role [primary|secondary|clear]  make this machine the source of truth on conflicts (or defer)
 
 GUI: \`npm run app\`.  Architecture: DESIGN.md.`);
 }
 
-const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, help, '--help': help, '-h': help };
+const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, help, '--help': help, '-h': help };
 
 (async () => {
   const fn = table[cmd] || (cmd ? () => { console.log(bad(`unknown command: ${cmd}`)); help(); } : help);
