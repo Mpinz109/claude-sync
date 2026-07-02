@@ -9,6 +9,7 @@ import { initVault, registerMachine } from '../src/vault.js';
 import { pushAll, pullAll, adoptFromVault, discoverProjects, status as syncStatus } from '../src/sync.js';
 import { gatherStatus } from '../src/status.js';
 import { tidyRegistration, dedupeVault } from '../src/maintain.js';
+import { Relay, DEFAULT_PORT } from '../src/relay.js';
 import * as schedule from '../src/schedule.js';
 import * as gitsync from '../src/gitsync.js';
 import { c, ok, warn, bad } from '../src/util.js';
@@ -130,6 +131,20 @@ function scheduleCmd() {
   } else {
     console.log(bad('usage: claude-sync schedule install|status|remove'));
   }
+}
+
+async function relayCmd() {
+  const pi = args.indexOf('--port');
+  const ti = args.indexOf('--token');
+  const relay = new Relay({
+    port: pi >= 0 ? Number(args[pi + 1]) : DEFAULT_PORT,
+    token: ti >= 0 ? args[ti + 1] : 'claude-migrate',
+  });
+  const port = await relay.start();
+  console.log(ok(`agent relay listening on 0.0.0.0:${port} (${relay.messages.length} message(s) in history)`));
+  console.log(c.dim(`store: ${relay.store}`));
+  console.log(c.dim('connect Claude sessions via bin/claude-sync-mcp.js — see `claude-sync help`. Ctrl+C to stop.'));
+  await new Promise(() => {}); // run until killed
 }
 
 async function tidy() {
@@ -262,11 +277,12 @@ function help() {
   project [list|on|off <name>]  per-project sync switch (off = excluded from push/pull/status)
   role [primary|secondary|clear]  make this machine the source of truth on conflicts (or defer)
   tidy [--yes]                 fix duplicate projects: merge dup vault records, clean dead/variant registrations
+  relay [--port N] [--token T] run the agent message relay (Claude sessions connect via bin/claude-sync-mcp.js)
 
 GUI: \`npm run app\`.  Architecture: DESIGN.md.`);
 }
 
-const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, tidy, help, '--help': help, '-h': help };
+const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, tidy, relay: relayCmd, help, '--help': help, '-h': help };
 
 (async () => {
   const fn = table[cmd] || (cmd ? () => { console.log(bad(`unknown command: ${cmd}`)); help(); } : help);
