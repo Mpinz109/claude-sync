@@ -10,6 +10,8 @@ import { pushAll, pullAll, adoptFromVault, discoverProjects, status as syncStatu
 import { gatherStatus } from '../src/status.js';
 import { tidyRegistration, dedupeVault } from '../src/maintain.js';
 import { Relay, DEFAULT_PORT } from '../src/relay.js';
+import { S3, loadAwsCreds } from '../src/s3.js';
+import { cloudPush, cloudPull, cloudSync } from '../src/cloud.js';
 import * as schedule from '../src/schedule.js';
 import * as gitsync from '../src/gitsync.js';
 import { c, ok, warn, bad } from '../src/util.js';
@@ -268,6 +270,64 @@ function filesCmd() {
   }
 }
 
+function configCmd() {
+  const [key, ...rest] = args;
+  const cfg = loadConfig();
+  if (!key) {
+    for (const [k, v] of Object.entries(cfg.settings)) {
+      const shown = k === 'vaultPassphrase' && v ? '(set)' : JSON.stringify(v);
+      console.log(`  ${k.padEnd(24)} ${shown}`);
+    }
+    return;
+  }
+  if (!rest.length) {
+    const v = cfg.settings[key];
+    console.log(key === 'vaultPassphrase' && v ? '(set)' : JSON.stringify(v));
+    return;
+  }
+  let value = rest.join(' ');
+  if (value === 'true') value = true;
+  else if (value === 'false') value = false;
+  try { setSetting(key, value); console.log(ok(`${key} = ${key === 'vaultPassphrase' ? '(set)' : JSON.stringify(value)}`)); }
+  catch (e) { console.log(bad(e.message)); }
+}
+
+async function cloudCmd() {
+  const sub = args[0] || 'info';
+  const cfg = loadConfig();
+  const st = cfg.settings;
+  if (sub === 'set') {
+    // claude-sync cloud set <bucket> [region] [prefix]
+    const [, bucket, region, prefix] = args;
+    if (!bucket) { console.log(bad('usage: claude-sync cloud set <bucket> [region] [prefix]')); return; }
+    setSetting('s3Bucket', bucket);
+    if (region) setSetting('s3Region', region);
+    if (prefix) setSetting('s3Prefix', prefix.endsWith('/') ? prefix : `${prefix}/`);
+    console.log(ok(`cloud vault: s3://${bucket}/${prefix || st.s3Prefix} (${region || st.s3Region})`));
+    return;
+  }
+  if (sub === 'info') {
+    if (!st.s3Bucket) { console.log(warn('cloud sync off — configure with `claude-sync cloud set <bucket> [region]` (see docs/aws-setup.md)')); return; }
+    const creds = loadAwsCreds(st.awsProfile);
+    console.log(`bucket   s3://${st.s3Bucket}/${st.s3Prefix} (${st.s3Region})`);
+    console.log(creds ? ok(`credentials found (profile "${st.awsProfile}" or env)`) : bad('no AWS credentials — see docs/aws-setup.md'));
+    console.log(st.vaultPassphrase ? ok('client-side encryption ON') : c.dim('client-side encryption off (set vaultPassphrase to enable)'));
+    return;
+  }
+  if (!['push', 'pull', 'sync'].includes(sub)) { console.log(bad('usage: claude-sync cloud info|set|push|pull|sync')); return; }
+  if (!cfg.vaultDir) { console.log(bad('no local vault — run init first')); return; }
+  if (!st.s3Bucket) { console.log(bad('no bucket — run `claude-sync cloud set <bucket> [region]` first')); return; }
+  const creds = loadAwsCreds(st.awsProfile);
+  if (!creds) { console.log(bad('no AWS credentials (env or ~/.aws/credentials) — see docs/aws-setup.md')); return; }
+  const s3 = new S3({ bucket: st.s3Bucket, region: st.s3Region, creds });
+  const opts = { vaultDir: cfg.vaultDir, s3, prefix: st.s3Prefix, passphrase: st.vaultPassphrase };
+  try {
+    if (sub === 'push') { const r = await cloudPush(opts); console.log(ok(`cloud push: uploaded ${r.uploaded.length}, unchanged ${r.unchanged}`)); }
+    else if (sub === 'pull') { const r = await cloudPull(opts); console.log(ok(`cloud pull: downloaded ${r.downloaded.length}, unchanged ${r.unchanged}`)); }
+    else { const r = await cloudSync(opts); console.log(ok(`cloud sync: downloaded ${r.pull.downloaded.length}, uploaded ${r.push.uploaded.length}`)); }
+  } catch (e) { console.log(bad(`cloud ${sub} failed: ${e.message.split('\n')[0]}`)); }
+}
+
 function help() {
   console.log(`${c.bold('claude-sync')} — sync Claude projects + history across computers
 
@@ -283,13 +343,15 @@ function help() {
   files status|push|pull       sync project FILES via git (remote ff, or vault bundles)
   project [list|on|off <name>]  per-project sync switch (off = excluded from push/pull/status)
   role [primary|secondary|clear]  make this machine the source of truth on conflicts (or defer)
+  cloud info|set|push|pull|sync   mirror the vault to your own S3 bucket (store-and-forward; optional encryption)
+  config [key] [value]         list / read / set settings (e.g. vaultPassphrase, scheduleAt)
   tidy [--yes]                 fix duplicate projects: merge dup vault records, clean dead/variant registrations
   relay [--port N] [--token T] run the agent message relay (Claude sessions connect via bin/claude-sync-mcp.js)
 
 GUI: \`npm run app\`.  Architecture: DESIGN.md.`);
 }
 
-const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, tidy, relay: relayCmd, help, '--help': help, '-h': help };
+const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, cloud: cloudCmd, config: configCmd, tidy, relay: relayCmd, help, '--help': help, '-h': help };
 
 (async () => {
   const fn = table[cmd] || (cmd ? () => { console.log(bad(`unknown command: ${cmd}`)); help(); } : help);

@@ -32,6 +32,11 @@ export const DEFAULT_SETTINGS = {
   awsDiscovery: '',             // optional self-hosted Syncthing discovery/relay URL
   projectsRoot: '',             // folder to scan for project folders during `adopt` (seeds a fresh machine)
   machineRole: '',              // '' | 'primary' | 'secondary' — primary is the source of truth on conflicts
+  s3Bucket: '',                 // cloud vault mirror: bucket name ('' = cloud sync off)
+  s3Region: 'eu-west-1',        // bucket region
+  s3Prefix: 'vault/',           // key prefix inside the bucket
+  awsProfile: 'default',        // ~/.aws/credentials profile (env vars win if set)
+  vaultPassphrase: '',          // optional: client-side AES-256-GCM for every cloud object
 };
 
 function defaults() {
