@@ -1,6 +1,7 @@
-// Phase 5: conflict detection + resolution. A conflict = same cliSessionId on
-// both sides with divergent content. These tests pin every settings path with no
-// real Claude state (temp machine profiles + temp vault).
+// v0.2 sync semantics: related divergence merges LOSSLESSLY (entry-level union,
+// src/treemerge.js); continued sessions propagate to the vault on push; only
+// UNRELATED content under the same session id is a true conflict (fork path).
+// All on temp machine profiles + a temp vault — no real Claude state.
 
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -9,8 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { encodeCwd } from '../src/platform.js';
 import { writeText, writeJson, readText } from '../src/util.js';
-import { initVault } from '../src/vault.js';
-import { tokenize, detokenize } from '../src/tokens.js';
+import { initVault, readVaultSession } from '../src/vault.js';
 import { pushProject, pullProject, status } from '../src/sync.js';
 
 const PROJ = 'p-merge';
@@ -38,10 +38,25 @@ function makeMachine(tag) {
 
 const tFile = (m, root, id) => path.join(m.paths.transcriptsDir, encodeCwd(root), `${id}.jsonl`);
 const forkFile = (m, root, id) => path.join(m.paths.transcriptsDir, encodeCwd(root), `${id}.fork`);
+const undoFiles = (m, root) => {
+  try { return fs.readdirSync(path.join(m.paths.transcriptsDir, encodeCwd(root))).filter((f) => f.endsWith('.undo')); }
+  catch { return []; }
+};
 const recents = (m, obj) => writeJson(path.join(m.paths.recentsDir, 'acct', 'org', `${obj.sessionId}.json`), obj);
 
-// Build: vault holds session S pushed from A; machine B has a DIVERGENT local S.
-function setup({ vaultLast = 200, localLast = 100, cleanIncoming = false } = {}) {
+const eLine = (uuid, ts, text) => JSON.stringify({ uuid, parentUuid: null, timestamp: ts, type: 'assistant', text });
+const baseLines = (projectRoot) => [
+  JSON.stringify({ type: 'user', cwd: projectRoot, sessionId: S }),
+  eLine('u-base', 't1', 'shared base'),
+];
+
+/**
+ * Vault holds S pushed from machine A. Machine B has its own local S.
+ *  - localKind 'ahead':     B = vault content + one extra entry (fast-forward)
+ *  - localKind 'diverged':  A pushed base+extraA; B has base+extraB (true merge)
+ *  - localKind 'unrelated': B's S shares nothing with the vault copy (conflict)
+ */
+function setup({ vaultLast = 200, localLast = 100, localKind = 'ahead', cleanIncoming = false } = {}) {
   const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'cs-merge-vault-'));
   tmps.push(vault);
   initVault(vault);
@@ -51,98 +66,125 @@ function setup({ vaultLast = 200, localLast = 100, cleanIncoming = false } = {})
   const cfgA = { vaultDir: vault, machineId: 'mA', machineName: 'A', projects: [] };
   const projA = { id: PROJ, name: 'P', localPath: A.projectRoot, gitRemote: '' };
 
-  const aLines = [
-    JSON.stringify({ type: 'user', cwd: A.projectRoot, sessionId: S }),
-    JSON.stringify({ type: 'assistant', text: 'shared base' }),
-  ].join('\n');
-  writeText(tFile(A, A.projectRoot, S), aLines);
+  const aLines = [...baseLines(A.projectRoot), ...(localKind === 'diverged' ? [eLine('u-fromA', 't3', 'EXTRA from A')] : [])];
+  writeText(tFile(A, A.projectRoot, S), aLines.join('\n'));
   recents(A, { sessionId: 'la_S', cliSessionId: S, title: 'S', lastActivityAt: vaultLast, cwd: A.projectRoot, transcriptUnavailable: true });
   pushProject(cfgA, projA, A.paths);
 
   if (cleanIncoming) {
-    const tLines = JSON.stringify({ type: 'user', cwd: A.projectRoot, sessionId: T });
-    writeText(tFile(A, A.projectRoot, T), tLines);
+    writeText(tFile(A, A.projectRoot, T), JSON.stringify({ type: 'user', cwd: A.projectRoot, sessionId: T }));
     recents(A, { sessionId: 'la_T', cliSessionId: T, title: 'T', lastActivityAt: vaultLast, cwd: A.projectRoot, transcriptUnavailable: true });
-    pushProject(cfgA, projA, A.paths); // S skipped, T pushed
+    pushProject(cfgA, projA, A.paths);
   }
 
-  // B's divergent local S (an extra line) + its own recents tile.
-  const bLines = [
-    JSON.stringify({ type: 'user', cwd: B.projectRoot, sessionId: S }),
-    JSON.stringify({ type: 'assistant', text: 'shared base' }),
-    JSON.stringify({ type: 'assistant', text: 'EXTRA edit made only on B' }),
-  ].join('\n');
-  writeText(tFile(B, B.projectRoot, S), bLines);
+  let bLines;
+  if (localKind === 'unrelated') bLines = [JSON.stringify({ totally: 'different' }), eLine('u-alien', 't1', 'no overlap')];
+  else if (localKind === 'diverged') bLines = [...baseLines(B.projectRoot), eLine('u-fromB', 't4', 'EXTRA from B')];
+  else bLines = [...baseLines(B.projectRoot), eLine('u-extraB', 't5', 'EXTRA edit made only on B')];
+  const bText = bLines.join('\n');
+  writeText(tFile(B, B.projectRoot, S), bText);
   recents(B, { sessionId: 'lb_S', cliSessionId: S, title: 'S', lastActivityAt: localLast, cwd: B.projectRoot, transcriptUnavailable: true });
 
   const projB = { id: PROJ, name: 'P', localPath: B.projectRoot, gitRemote: '' };
-  // What A's session looks like once re-materialized on B (vault content, B paths):
-  const vaultOnB = detokenize(
-    tokenize(aLines, { home: A.paths.home, projectRoot: A.projectRoot }),
-    { home: B.paths.home, projectRoot: B.projectRoot },
-  );
-  return { vault, A, B, projB, bLines, vaultOnB };
+  return { vault, A, B, projB, bText };
 }
 
-const cfgB = (vault, projB, settings) => ({ vaultDir: vault, machineId: 'mB', machineName: 'B', projects: [projB], settings });
+const cfgB = (vault, projB, settings = {}) => ({ vaultDir: vault, machineId: 'mB', machineName: 'B', projects: [projB], settings });
 
-test('autoMerge off: conflict reported, nothing written', () => {
-  const s = setup();
-  const r = pullProject(cfgB(s.vault, s.projB, { autoMerge: false, autoMergeIfNoConflicts: true }), s.projB, s.B.paths, { dryRun: false });
-  assert.deepEqual(r.conflicts, [S]);
-  assert.deepEqual(r.pulled, []);
-  assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bLines, 'local untouched');
-  assert.equal(fs.existsSync(forkFile(s.B, s.projB.localPath, S)), false, 'no fork written');
+// ---------- lossless paths ----------
+
+test('local ahead of vault: pull writes nothing; push UPDATES the vault copy', () => {
+  const s = setup({ localKind: 'ahead' });
+  const r = pullProject(cfgB(s.vault, s.projB), s.projB, s.B.paths, { dryRun: false });
+  assert.deepEqual(r.conflicts, []);
+  assert.deepEqual(r.merged, []);
+  assert.ok(r.skipped.includes(S), 'local superset: nothing to pull');
+  assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bText, 'local untouched');
+
+  const pr = pushProject(cfgB(s.vault, s.projB), s.projB, s.B.paths);
+  assert.deepEqual(pr.updated, [S], 'continued session propagates to the vault');
+  const v = readVaultSession(s.vault, PROJ, S);
+  assert.ok(v.transcriptTokenized.includes('EXTRA edit made only on B'));
+  assert.equal(v.meta.updatedByMachineId, 'mB');
+
+  const pr2 = pushProject(cfgB(s.vault, s.projB), s.projB, s.B.paths);
+  assert.deepEqual(pr2.updated, [], 'push is idempotent after the update');
 });
 
-test('autoMerge on, vault newer: vault wins, old local kept as .fork', () => {
-  const s = setup({ vaultLast: 300, localLast: 100 });
+test('true divergence, defaults: pull merges losslessly with an undo snapshot', () => {
+  const s = setup({ localKind: 'diverged' });
+  const r = pullProject(cfgB(s.vault, s.projB), s.projB, s.B.paths, { dryRun: false });
+  assert.deepEqual(r.merged, [S]);
+  assert.deepEqual(r.conflicts, []);
+  assert.deepEqual(r.forks, []);
+  const text = readText(tFile(s.B, s.projB.localPath, S));
+  assert.ok(text.includes('EXTRA from A') && text.includes('EXTRA from B'), 'both branches kept');
+  assert.equal(undoFiles(s.B, s.projB.localPath).length, 1, 'undo snapshot written before overwrite');
+});
+
+test('divergence with autoMergeIfNoConflicts off: reported as available, nothing written', () => {
+  const s = setup({ localKind: 'diverged' });
+  const r = pullProject(cfgB(s.vault, s.projB, { autoMergeIfNoConflicts: false }), s.projB, s.B.paths, { dryRun: false });
+  assert.ok(r.available.includes(S));
+  assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bText, 'local untouched');
+});
+
+test('dry-run divergence: merge reported, nothing written', () => {
+  const s = setup({ localKind: 'diverged' });
+  const r = pullProject(cfgB(s.vault, s.projB), s.projB, s.B.paths, { dryRun: true });
+  assert.deepEqual(r.merged, [S]);
+  assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bText);
+  assert.equal(undoFiles(s.B, s.projB.localPath).length, 0);
+});
+
+// ---------- true conflicts (unrelated content) ----------
+
+test('unrelated content, autoMerge off: conflict reported, nothing written', () => {
+  const s = setup({ localKind: 'unrelated' });
+  const r = pullProject(cfgB(s.vault, s.projB, { autoMerge: false }), s.projB, s.B.paths, { dryRun: false });
+  assert.deepEqual(r.conflicts, [S]);
+  assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bText, 'local untouched');
+  assert.equal(fs.existsSync(forkFile(s.B, s.projB.localPath, S)), false);
+});
+
+test('unrelated content, autoMerge on, vault newer: vault wins, old local kept as .fork', () => {
+  const s = setup({ localKind: 'unrelated', vaultLast: 300, localLast: 100 });
   const r = pullProject(cfgB(s.vault, s.projB, { autoMerge: true }), s.projB, s.B.paths, { dryRun: false });
-  assert.deepEqual(r.pulled, [S]);
   assert.equal(r.forks.length, 1);
   assert.equal(r.forks[0].winner, 'vault');
-  assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.vaultOnB, 'live transcript is now the vault version');
-  assert.equal(readText(forkFile(s.B, s.projB.localPath, S)), s.bLines, 'loser (old local) preserved as .fork');
+  assert.equal(readText(forkFile(s.B, s.projB.localPath, S)), s.bText, 'loser preserved as .fork');
 });
 
-test('autoMerge on, local newer: local wins, vault copy kept as .fork', () => {
-  const s = setup({ vaultLast: 100, localLast: 300 });
-  const r = pullProject(cfgB(s.vault, s.projB, { autoMerge: true }), s.projB, s.B.paths, { dryRun: false });
-  assert.deepEqual(r.pulled, []);
-  assert.equal(r.forks[0].winner, 'local');
-  assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bLines, 'local kept');
-  assert.equal(readText(forkFile(s.B, s.projB.localPath, S)), s.vaultOnB, 'loser (vault copy) preserved as .fork');
+test('push leaves an unrelated vault copy alone (pushConflicts)', () => {
+  const s = setup({ localKind: 'unrelated' });
+  const before = readVaultSession(s.vault, PROJ, S).transcriptTokenized;
+  const pr = pushProject(cfgB(s.vault, s.projB), s.projB, s.B.paths);
+  assert.deepEqual(pr.pushConflicts, [S]);
+  assert.equal(readVaultSession(s.vault, PROJ, S).transcriptTokenized, before, 'vault untouched');
 });
 
-test('status reports the conflict count', () => {
-  const s = setup();
-  const [row] = status(cfgB(s.vault, s.projB, {}), s.B.paths);
-  assert.equal(row.conflicts, 1);
-  assert.equal(row.local, 1);
-  assert.equal(row.vault, 1);
-  assert.equal(row.toPush, 0);
-  assert.equal(row.toPull, 0);
-});
+// ---------- clean incoming (unchanged from Phase 5) ----------
 
-test('clean incoming is applied alongside an unresolved conflict (defaults)', () => {
-  const s = setup({ cleanIncoming: true });
-  const r = pullProject(cfgB(s.vault, s.projB, { autoMerge: false, autoMergeIfNoConflicts: true }), s.projB, s.B.paths, { dryRun: false });
-  assert.ok(r.pulled.includes(T), 'new session T pulled');
-  assert.deepEqual(r.conflicts, [S], 'S still a conflict');
+test('clean incoming still applies alongside other sessions (defaults)', () => {
+  const s = setup({ localKind: 'ahead', cleanIncoming: true });
+  const r = pullProject(cfgB(s.vault, s.projB), s.projB, s.B.paths, { dryRun: false });
+  assert.ok(r.pulled.includes(T));
   assert.equal(fs.existsSync(tFile(s.B, s.projB.localPath, T)), true);
 });
 
-test('autoMergeIfNoConflicts off: clean incoming is reported, not applied', () => {
-  const s = setup({ cleanIncoming: true });
-  const r = pullProject(cfgB(s.vault, s.projB, { autoMerge: false, autoMergeIfNoConflicts: false }), s.projB, s.B.paths, { dryRun: false });
+test('autoMergeIfNoConflicts off: clean incoming reported, not applied', () => {
+  const s = setup({ localKind: 'ahead', cleanIncoming: true });
+  const r = pullProject(cfgB(s.vault, s.projB, { autoMergeIfNoConflicts: false }), s.projB, s.B.paths, { dryRun: false });
   assert.ok(r.available.includes(T));
-  assert.ok(!r.pulled.includes(T));
   assert.equal(fs.existsSync(tFile(s.B, s.projB.localPath, T)), false);
 });
 
-test('dry-run flags the conflict without writing anything', () => {
-  const s = setup();
-  const r = pullProject(cfgB(s.vault, s.projB, { autoMerge: true }), s.projB, s.B.paths, { dryRun: true });
-  assert.deepEqual(r.conflicts, [S]);
-  assert.equal(fs.existsSync(forkFile(s.B, s.projB.localPath, S)), false);
+// ---------- status ----------
+
+test('status counts a hash-diverged session in the conflicts column', () => {
+  const s = setup({ localKind: 'diverged' });
+  const [row] = status(cfgB(s.vault, s.projB), s.B.paths);
+  assert.equal(row.conflicts, 1);
+  assert.equal(row.local, 1);
+  assert.equal(row.vault, 1);
 });

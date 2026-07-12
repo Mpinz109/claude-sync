@@ -94,7 +94,11 @@ function push() {
   const cfg = loadConfig();
   if (!cfg.vaultDir) { console.log(bad('no vault — run init first')); return; }
   const results = pushAll();
-  for (const r of results) console.log(ok(`${r.project}: pushed ${r.pushed.length}, already there ${r.skipped.length}`));
+  for (const r of results) {
+    let line = `${r.project}: pushed ${r.pushed.length}, updated ${r.updated?.length ?? 0}, already there ${r.skipped.length}`;
+    console.log(ok(line));
+    if (r.pushConflicts?.length) console.log(warn(`  ${r.pushConflicts.length} session(s) unrelated to their vault copy, left alone: ${r.pushConflicts.map((id) => id.slice(0, 8)).join(', ')}`));
+  }
 }
 
 async function pull() {
@@ -103,9 +107,12 @@ async function pull() {
   if (res.blocked) { console.log(warn(res.reason)); return; }
   for (const r of res.results) {
     if (dryRun) {
-      console.log(`${r.project}: ${r.pulled.length} would be pulled` + (r.conflicts.length ? warn(`, ${r.conflicts.length} conflict(s)`) : ''));
+      let line = `${r.project}: ${r.pulled.length} would be pulled`;
+      if (r.merged?.length) line += `, ${r.merged.length} would merge`;
+      if (r.conflicts.length) line += warn(`, ${r.conflicts.length} conflict(s)`);
+      console.log(line);
     } else {
-      let line = `${r.project}: pulled ${r.pulled.length}, already local ${r.skipped.length}`;
+      let line = `${r.project}: pulled ${r.pulled.length}, merged ${r.merged?.length ?? 0}, already local ${r.skipped.length}`;
       if (r.noRecents.length) line += c.dim(` (${r.noRecents.length} without a tile)`);
       console.log(ok(line));
       if (r.forks?.length) console.log(c.dim(`  resolved ${r.forks.length} conflict(s); loser kept as <id>.fork: ${r.forks.map((f) => f.cliSessionId.slice(0, 8)).join(', ')}`));

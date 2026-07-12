@@ -92,6 +92,12 @@ schedule — designed to be usable without the command line.
 - Refuses to write Claude state while Claude is running.
 - Additive by default; conflicts keep both sides. Back up before first use.
 
+## Credits
+
+The entry-level (lossless) transcript merge approach was inspired by
+[perfectra1n/claude-code-sync](https://github.com/perfectra1n/claude-code-sync) (MIT),
+a git-based CLI for the same problem and worth a look if you prefer that model.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
