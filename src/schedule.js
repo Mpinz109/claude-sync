@@ -40,12 +40,17 @@ export function buildCommandArgs({ node = process.execPath, cliPath = defaultCli
 }
 
 // ---------- Windows: Task Scheduler XML ----------
-export function windowsTaskXml({ time, node = process.execPath, cliPath = defaultCliPath() }) {
+export function windowsTaskXml({ time, node = process.execPath, cliPath = defaultCliPath(), runAsNode = false }) {
   const { hour, minute } = parseTime(time);
   const start = `2020-01-01T${pad2(hour)}:${pad2(minute)}:00`;
   // Command = the node exe; Arguments = the quoted script path + subcommand.
-  const command = node;
-  const args = `"${cliPath}" push`;
+  // Packaged app: process.execPath is the Electron GUI binary, which needs
+  // ELECTRON_RUN_AS_NODE=1 to behave as node. Task Scheduler's <Exec> cannot
+  // set env vars, so wrap in cmd (&& XML-escaped below).
+  const command = runAsNode ? 'cmd.exe' : node;
+  const args = runAsNode
+    ? `/c set ELECTRON_RUN_AS_NODE=1&amp;&amp; "${node}" "${cliPath}" push`
+    : `"${cliPath}" push`;
   return [
     '<?xml version="1.0" encoding="UTF-16"?>',
     '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
@@ -73,9 +78,12 @@ export const LAUNCHD_LABEL = 'com.claude-sync.daily';
 export function launchdPlistPath(home = os.homedir()) {
   return path.join(home, 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
 }
-export function launchdPlist({ time, node = process.execPath, cliPath = defaultCliPath() }) {
+export function launchdPlist({ time, node = process.execPath, cliPath = defaultCliPath(), runAsNode = false }) {
   const { hour, minute } = parseTime(time);
   const progArgs = buildCommandArgs({ node, cliPath }).map((a) => `    <string>${a}</string>`).join('\n');
+  const envBlock = runAsNode
+    ? ['  <key>EnvironmentVariables</key><dict>', '    <key>ELECTRON_RUN_AS_NODE</key><string>1</string>', '  </dict>']
+    : [];
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
@@ -84,6 +92,7 @@ export function launchdPlist({ time, node = process.execPath, cliPath = defaultC
     '  <key>ProgramArguments</key><array>',
     progArgs,
     '  </array>',
+    ...envBlock,
     '  <key>StartCalendarInterval</key><dict>',
     `    <key>Hour</key><integer>${hour}</integer>`,
     `    <key>Minute</key><integer>${minute}</integer>`,
@@ -95,27 +104,28 @@ export function launchdPlist({ time, node = process.execPath, cliPath = defaultC
 
 // ---------- Linux: crontab line ----------
 export const CRON_TAG = '# claude-sync-daily';
-export function cronLine({ time, node = process.execPath, cliPath = defaultCliPath() }) {
+export function cronLine({ time, node = process.execPath, cliPath = defaultCliPath(), runAsNode = false }) {
   const { hour, minute } = parseTime(time);
-  return `${minute} ${hour} * * * "${node}" "${cliPath}" push ${CRON_TAG}`;
+  const env = runAsNode ? 'ELECTRON_RUN_AS_NODE=1 ' : '';
+  return `${minute} ${hour} * * * ${env}"${node}" "${cliPath}" push ${CRON_TAG}`;
 }
 
 /**
  * Describe (without executing) what install would do on a platform. Pure —
  * everything apply() needs, so tests can assert per-OS artifacts.
  */
-export function planInstall(settings = {}, { platform = process.platform, node, cliPath, home = os.homedir() } = {}) {
+export function planInstall(settings = {}, { platform = process.platform, node, cliPath, home = os.homedir(), runAsNode = !!process.versions.electron } = {}) {
   const time = settings.scheduleAt || '03:00';
   if (platform === 'win32') {
     return { platform, tool: 'schtasks', taskName: TASK_NAME, time,
-      xml: windowsTaskXml({ time, node, cliPath }),
+      xml: windowsTaskXml({ time, node, cliPath, runAsNode }),
       createArgs: (xmlPath) => ['/Create', '/TN', TASK_NAME, '/XML', xmlPath, '/F'] };
   }
   if (platform === 'darwin') {
     return { platform, tool: 'launchctl', label: LAUNCHD_LABEL, time,
-      plistPath: launchdPlistPath(home), plist: launchdPlist({ time, node, cliPath }) };
+      plistPath: launchdPlistPath(home), plist: launchdPlist({ time, node, cliPath, runAsNode }) };
   }
-  return { platform, tool: 'crontab', tag: CRON_TAG, time, line: cronLine({ time, node, cliPath }) };
+  return { platform, tool: 'crontab', tag: CRON_TAG, time, line: cronLine({ time, node, cliPath, runAsNode }) };
 }
 
 // ---------- execution (not unit-tested; shells out) ----------

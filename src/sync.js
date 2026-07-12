@@ -8,6 +8,7 @@ import { loadConfig, saveConfig, normalizePath } from './config.js';
 import { readJson } from './util.js';
 import { tokenize, detokenize } from './tokens.js';
 import { mergeTranscripts } from './treemerge.js';
+import { getRemoteUrl } from './gitsync.js';
 import * as vault from './vault.js';
 import * as local from './local.js';
 
@@ -26,10 +27,16 @@ export function pushProject(cfg, project, paths) {
     const transcriptTokenized = tokenize(raw, { home, projectRoot: project.localPath });
     const recentsTokenized = s.recentsEntry ? tokenize(JSON.stringify(s.recentsEntry), { home, projectRoot: project.localPath }) : null;
 
+    // Where this machine keeps the recents tile (acct/org guid subpath) — shipped
+    // in meta so a FRESH machine can create the folder structure on pull.
+    const recEntry = recentsIndex.get(s.cliSessionId);
+    const recentsDirRel = recEntry ? path.relative(paths.recentsDir, path.dirname(recEntry.file)).split(path.sep).join('/') : null;
+
     if (!vault.vaultHasSession(cfg.vaultDir, project.id, s.cliSessionId)) {
       const meta = {
         cliSessionId: s.cliSessionId,
         sessionId: s.sessionId,
+        recentsDirRel,
         title: s.recentsEntry?.title || null,
         model: s.recentsEntry?.model || null,
         createdAt: s.recentsEntry?.createdAt || null,
@@ -55,6 +62,7 @@ export function pushProject(cfg, project, paths) {
     const vaultLast = v.meta?.lastActivityAt || 0;
     const meta = {
       ...v.meta,
+      recentsDirRel: v.meta?.recentsDirRel || recentsDirRel,
       lastActivityAt: Math.max(localLast, vaultLast) || v.meta?.lastActivityAt || null,
       title: (localLast >= vaultLast && s.recentsEntry?.title) || v.meta?.title || null,
       hasRecents: v.meta?.hasRecents || !!s.recentsEntry,
@@ -117,7 +125,7 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
     local.writeLocalTranscript(paths, project.localPath, cliSessionId, jsonl);
     if (v.recentsTokenized) {
       const entry = JSON.parse(detokenize(v.recentsTokenized, { home, projectRoot: project.localPath }));
-      if (!local.writeLocalRecents(paths, entry)) noRecents.push(cliSessionId);
+      if (!local.writeLocalRecents(paths, entry, v.meta?.recentsDirRel)) noRecents.push(cliSessionId);
     }
     local.registerProject(paths, project.localPath);
     return jsonl;
@@ -154,7 +162,7 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
       const localLast0 = localS.recentsEntry?.lastActivityAt || 0;
       if (v0.recentsTokenized && vaultLast0 > localLast0) {
         const entry = JSON.parse(detokenize(v0.recentsTokenized, { home, projectRoot: project.localPath }));
-        if (!local.writeLocalRecents(paths, entry)) noRecents.push(cliSessionId);
+        if (!local.writeLocalRecents(paths, entry, v0.meta?.recentsDirRel)) noRecents.push(cliSessionId);
       }
       local.registerProject(paths, project.localPath);
       merged.push(cliSessionId);
@@ -300,7 +308,7 @@ export function adoptFromVault(cfg = loadConfig(), paths = resolvePaths(), { per
     if (!localPath) { unmatched.push(pj.name); continue; }
     const np = normalizePath(localPath);
     if (claimed.has(np)) { duplicates.push(pj.name); continue; } // same folder already linked
-    cfg.projects.push({ id: pj.id, name: pj.name, localPath, gitRemote: pj.gitRemote || '' });
+    cfg.projects.push({ id: pj.id, name: pj.name, localPath, gitRemote: pj.gitRemote || getRemoteUrl(localPath) });
     claimed.add(np);
     adopted.push({ name: pj.name, localPath });
   }

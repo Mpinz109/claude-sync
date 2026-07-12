@@ -55,6 +55,10 @@ export function currentBranch(localPath) {
 export function hasRemote(localPath, remote = 'origin') {
   try { return git(localPath, ['remote']).split(/\r?\n/).includes(remote); } catch { return false; }
 }
+/** The remote's URL, or '' (no repo / no such remote / git missing). */
+export function getRemoteUrl(localPath, remote = 'origin') {
+  try { return git(localPath, ['remote', 'get-url', remote]); } catch { return ''; }
+}
 
 // ---------- per-project operations ----------
 /** Publish local commits: push to the shared remote, else write a vault bundle. */
