@@ -76,3 +76,21 @@ test('planInstall defaults to 03:00 when scheduleAt unset', () => {
   const p = planInstall({}, { platform: 'linux', node: NODE, cliPath: CLI });
   assert.ok(p.line.startsWith('0 3 * * *'));
 });
+
+// ---------- packaged-app mode (ELECTRON_RUN_AS_NODE) ----------
+test('runAsNode windows: wraps in cmd with ELECTRON_RUN_AS_NODE (XML-escaped)', () => {
+  const xml = windowsTaskXml({ ...opt, runAsNode: true });
+  assert.ok(xml.includes('<Command>cmd.exe</Command>'));
+  assert.ok(xml.includes('set ELECTRON_RUN_AS_NODE=1&amp;&amp;'));
+  assert.ok(xml.includes(`"${NODE}" "${CLI}" push`));
+});
+
+test('runAsNode launchd: EnvironmentVariables dict present', () => {
+  const plist = launchdPlist({ ...opt, runAsNode: true });
+  assert.ok(plist.includes('<key>ELECTRON_RUN_AS_NODE</key><string>1</string>'));
+  assert.ok(!launchdPlist(opt).includes('ELECTRON_RUN_AS_NODE'), 'absent without runAsNode');
+});
+
+test('runAsNode cron: env prefix on the line', () => {
+  assert.ok(cronLine({ ...opt, runAsNode: true }).startsWith('0 3 * * * ELECTRON_RUN_AS_NODE=1 '));
+});

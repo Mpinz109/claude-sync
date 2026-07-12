@@ -109,10 +109,18 @@ export function snapshotLocalTranscript(paths, localPath, cliSessionId) {
   return dest;
 }
 
-/** Write a recents entry (BOM-free) into the detected guid folder. Returns path or null. */
-export function writeLocalRecents(paths, entryObj) {
-  const dir = detectRecentsTargetDir(paths);
-  if (!dir) return null; // no existing structure to place it in
+/**
+ * Write a recents entry (BOM-free) into the detected guid folder. On a fresh
+ * machine with no existing structure, fall back to the acct/org subpath the
+ * pushing machine recorded (fallbackRel) and create it. Returns path or null.
+ */
+export function writeLocalRecents(paths, entryObj, fallbackRel = null) {
+  let dir = detectRecentsTargetDir(paths);
+  if (!dir && fallbackRel) {
+    dir = path.join(paths.recentsDir, ...fallbackRel.split('/'));
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  if (!dir) return null; // no existing structure and nothing recorded to recreate
   if ('transcriptUnavailable' in entryObj) entryObj.transcriptUnavailable = false;
   const file = path.join(dir, `${entryObj.sessionId}.json`);
   writeText(file, JSON.stringify(entryObj));

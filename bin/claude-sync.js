@@ -50,12 +50,13 @@ function link() {
   const [name, p] = args;
   if (!name || !p) { console.log(bad('usage: claude-sync link <name> <localPath>')); return; }
   const localPath = path.resolve(p);
-  const id = addProject(name, localPath);
-  console.log(ok(`linked "${name}" -> ${localPath} ${c.dim(`(${id.slice(0, 8)})`)}`));
+  const remote = gitsync.getRemoteUrl(localPath);
+  const id = addProject(name, localPath, remote);
+  console.log(ok(`linked "${name}" -> ${localPath} ${c.dim(`(${id.slice(0, 8)})`)}${remote ? c.dim(` git:${remote}`) : ''}`));
 }
 
 function linkAll() {
-  const d = discoverProjects();
+  const d = discoverProjects().map((p) => ({ ...p, gitRemote: gitsync.getRemoteUrl(p.localPath) }));
   if (!d.length) { console.log(warn('no unlinked projects detected')); return; }
   const r = linkProjects(d);
   console.log(ok(`linked ${r.added} project(s); ${r.total} total`));

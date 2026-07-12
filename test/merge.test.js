@@ -188,3 +188,18 @@ test('status counts a hash-diverged session in the conflicts column', () => {
   assert.equal(row.local, 1);
   assert.equal(row.vault, 1);
 });
+
+// ---------- fresh-machine recents fallback ----------
+test('fresh machine with no recents structure still gets a tile (recentsDirRel fallback)', () => {
+  const s = setup({ localKind: 'ahead', cleanIncoming: true });
+  const C = makeMachine('C'); // brand new: empty recents dir, no guid folders
+  const projC = { id: PROJ, name: 'P', localPath: path.join(C.paths.home, 'RCP', 'Proj') };
+  fs.mkdirSync(projC.localPath, { recursive: true });
+  const cfgC = { vaultDir: s.vault, machineId: 'mC', machineName: 'C', projects: [projC], settings: {} };
+  const r = pullProject(cfgC, projC, C.paths, { dryRun: false });
+  assert.ok(r.pulled.length >= 1);
+  assert.deepEqual(r.noRecents, [], 'no tile went missing');
+  const guidDir = path.join(C.paths.recentsDir, 'acct', 'org');
+  assert.ok(fs.existsSync(guidDir), 'acct/org structure recreated from vault meta');
+  assert.ok(fs.readdirSync(guidDir).some((f) => f.endsWith('.json')), 'tile written');
+});
