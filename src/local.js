@@ -95,6 +95,20 @@ export function writeLocalTranscriptFork(paths, localPath, cliSessionId, jsonlTe
   return file;
 }
 
+/**
+ * Undo snapshot: before a merge/overwrite touches a live transcript, copy the
+ * current bytes to `<id>.<stamp>.undo` beside it (never `.jsonl`, so Claude and
+ * listLocalSessions ignore it). Cheap insurance on top of the .fork rule.
+ */
+export function snapshotLocalTranscript(paths, localPath, cliSessionId) {
+  const file = path.join(paths.transcriptsDir, encodeCwd(localPath), `${cliSessionId}.jsonl`);
+  if (!fs.existsSync(file)) return null;
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const dest = path.join(paths.transcriptsDir, encodeCwd(localPath), `${cliSessionId}.${stamp}.undo`);
+  fs.copyFileSync(file, dest);
+  return dest;
+}
+
 /** Write a recents entry (BOM-free) into the detected guid folder. Returns path or null. */
 export function writeLocalRecents(paths, entryObj) {
   const dir = detectRecentsTargetDir(paths);

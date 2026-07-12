@@ -7,6 +7,7 @@ import { resolvePaths, claudeRunning } from './platform.js';
 import { loadConfig, saveConfig, normalizePath } from './config.js';
 import { readJson } from './util.js';
 import { tokenize, detokenize } from './tokens.js';
+import { mergeTranscripts } from './treemerge.js';
 import * as vault from './vault.js';
 import * as local from './local.js';
 
@@ -19,28 +20,56 @@ export function pushProject(cfg, project, paths) {
   vault.ensureProject(cfg.vaultDir, { id: project.id, name: project.name, machineId: cfg.machineId, localPath: project.localPath, gitRemote: project.gitRemote });
   const recentsIndex = local.readRecentsIndex(paths);
   const sessions = local.listLocalSessions(paths, project.localPath, recentsIndex);
-  const pushed = [], skipped = [];
+  const pushed = [], skipped = [], updated = [], pushConflicts = [];
   for (const s of sessions) {
-    if (vault.vaultHasSession(cfg.vaultDir, project.id, s.cliSessionId)) { skipped.push(s.cliSessionId); continue; }
     const raw = local.readTranscript(s.transcriptPath);
     const transcriptTokenized = tokenize(raw, { home, projectRoot: project.localPath });
     const recentsTokenized = s.recentsEntry ? tokenize(JSON.stringify(s.recentsEntry), { home, projectRoot: project.localPath }) : null;
+
+    if (!vault.vaultHasSession(cfg.vaultDir, project.id, s.cliSessionId)) {
+      const meta = {
+        cliSessionId: s.cliSessionId,
+        sessionId: s.sessionId,
+        title: s.recentsEntry?.title || null,
+        model: s.recentsEntry?.model || null,
+        createdAt: s.recentsEntry?.createdAt || null,
+        lastActivityAt: s.recentsEntry?.lastActivityAt || null,
+        hasRecents: !!s.recentsEntry,
+        originMachineId: cfg.machineId,
+        originMachineName: cfg.machineName,
+        contentHash: local.sha256(transcriptTokenized),
+      };
+      vault.writeVaultSession(cfg.vaultDir, project.id, { cliSessionId: s.cliSessionId, transcriptTokenized, recentsTokenized, meta });
+      pushed.push(s.cliSessionId);
+      continue;
+    }
+
+    // Session already in the vault. v0.2: continued conversations PROPAGATE —
+    // merge local into the vault copy instead of skipping forever.
+    const v = vault.readVaultSession(cfg.vaultDir, project.id, s.cliSessionId);
+    if (v.meta?.contentHash === local.sha256(transcriptTokenized)) { skipped.push(s.cliSessionId); continue; }
+    const m = mergeTranscripts(v.transcriptTokenized, transcriptTokenized);
+    if (!m.related) { pushConflicts.push(s.cliSessionId); continue; } // nothing in common: leave the vault alone
+    if (m.identical || !m.aChanged) { skipped.push(s.cliSessionId); continue; } // vault already a superset
+    const localLast = s.recentsEntry?.lastActivityAt || 0;
+    const vaultLast = v.meta?.lastActivityAt || 0;
     const meta = {
-      cliSessionId: s.cliSessionId,
-      sessionId: s.sessionId,
-      title: s.recentsEntry?.title || null,
-      model: s.recentsEntry?.model || null,
-      createdAt: s.recentsEntry?.createdAt || null,
-      lastActivityAt: s.recentsEntry?.lastActivityAt || null,
-      hasRecents: !!s.recentsEntry,
-      originMachineId: cfg.machineId,
-      originMachineName: cfg.machineName,
-      contentHash: local.sha256(transcriptTokenized),
+      ...v.meta,
+      lastActivityAt: Math.max(localLast, vaultLast) || v.meta?.lastActivityAt || null,
+      title: (localLast >= vaultLast && s.recentsEntry?.title) || v.meta?.title || null,
+      hasRecents: v.meta?.hasRecents || !!s.recentsEntry,
+      updatedByMachineId: cfg.machineId,
+      contentHash: local.sha256(m.text),
     };
-    vault.writeVaultSession(cfg.vaultDir, project.id, { cliSessionId: s.cliSessionId, transcriptTokenized, recentsTokenized, meta });
-    pushed.push(s.cliSessionId);
+    vault.writeVaultSession(cfg.vaultDir, project.id, {
+      cliSessionId: s.cliSessionId,
+      transcriptTokenized: m.text,
+      recentsTokenized: (localLast >= vaultLast && recentsTokenized) ? recentsTokenized : v.recentsTokenized,
+      meta,
+    });
+    updated.push(s.cliSessionId);
   }
-  return { project: project.name, pushed, skipped };
+  return { project: project.name, pushed, skipped, updated, pushConflicts };
 }
 
 /** Hash a local session the same way push hashes vault sessions (tokenized). */
@@ -79,7 +108,7 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
     local.listLocalSessions(paths, project.localPath, recentsIndex).map((s) => [s.cliSessionId, s]),
   );
   const sessions = vault.listVaultSessions(cfg.vaultDir, project.id);
-  const pulled = [], skipped = [], noRecents = [], conflicts = [], forks = [], available = [];
+  const pulled = [], skipped = [], noRecents = [], conflicts = [], forks = [], available = [], merged = [];
 
   // Write a vault session's transcript + recents locally, register the project.
   const apply = (cliSessionId) => {
@@ -105,10 +134,34 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
       continue;
     }
 
-    // Present on both sides — identical or conflict?
+    // Present on both sides — identical or divergent?
     const localHash = localSessionHash(localS, home, project.localPath);
     if (meta?.contentHash && meta.contentHash === localHash) { skipped.push(cliSessionId); continue; }
 
+    // v0.2: try a LOSSLESS entry-level merge first (union by entry uuid — see
+    // src/treemerge.js). Related divergence is not a conflict; it merges.
+    const v0 = vault.readVaultSession(cfg.vaultDir, project.id, cliSessionId);
+    const vaultLocalized = detokenize(v0.transcriptTokenized, { home, projectRoot: project.localPath });
+    const localRaw0 = local.readTranscript(localS.transcriptPath);
+    const m = mergeTranscripts(localRaw0, vaultLocalized);
+    if (m.related) {
+      if (m.identical || !m.aChanged) { skipped.push(cliSessionId); continue; } // local is already a superset; push will update the vault
+      if (!applyClean) { available.push(cliSessionId); continue; }               // lossless, but the user said don't auto-apply
+      if (dryRun) { merged.push(cliSessionId); continue; }
+      local.snapshotLocalTranscript(paths, project.localPath, cliSessionId);     // undo insurance before touching a live transcript
+      local.writeLocalTranscript(paths, project.localPath, cliSessionId, m.text);
+      const vaultLast0 = meta?.lastActivityAt || 0;
+      const localLast0 = localS.recentsEntry?.lastActivityAt || 0;
+      if (v0.recentsTokenized && vaultLast0 > localLast0) {
+        const entry = JSON.parse(detokenize(v0.recentsTokenized, { home, projectRoot: project.localPath }));
+        if (!local.writeLocalRecents(paths, entry)) noRecents.push(cliSessionId);
+      }
+      local.registerProject(paths, project.localPath);
+      merged.push(cliSessionId);
+      continue;
+    }
+
+    // UNRELATED content under the same session id: a true conflict.
     if (!autoMerge) { conflicts.push(cliSessionId); continue; } // report, change nothing
     if (dryRun) { conflicts.push(cliSessionId); continue; }
 
@@ -133,7 +186,7 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
       forks.push({ cliSessionId, winner: 'local', loserKeptAsFork: 'vault' });
     }
   }
-  return { project: project.name, pulled, skipped, noRecents, conflicts, forks, available };
+  return { project: project.name, pulled, skipped, noRecents, conflicts, forks, available, merged };
 }
 
 export function pushAll(cfg = loadConfig(), paths = resolvePaths()) {

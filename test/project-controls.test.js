@@ -31,12 +31,18 @@ function makeMachine(tag) {
   return { root, paths };
 }
 
-function seedSession(m, projectRoot, id, { extra = '', last = 100, recentsId = 'r' } = {}) {
+function seedSession(m, projectRoot, id, { extra = '', last = 100, recentsId = 'r', unrelated = false } = {}) {
   fs.mkdirSync(projectRoot, { recursive: true });
-  const lines = [
+  // v0.2: related divergence MERGES losslessly (treemerge), so the role/fork
+  // tests below seed UNRELATED content (no shared lines or uuids) to reach the
+  // true-conflict path that roles govern.
+  const lines = (unrelated ? [
+    JSON.stringify({ type: 'note', marker: 'no-overlap' + extra }),
+    JSON.stringify({ type: 'assistant', text: 'unrelated' + extra }),
+  ] : [
     JSON.stringify({ type: 'user', cwd: projectRoot, sessionId: id }),
     JSON.stringify({ type: 'assistant', text: 'base' + extra }),
-  ].join('\n');
+  ]).join('\n');
   writeText(path.join(m.paths.transcriptsDir, encodeCwd(projectRoot), `${id}.jsonl`), lines);
   writeJson(path.join(m.paths.recentsDir, 'acct', 'org', `${recentsId}.json`),
     { sessionId: recentsId, cliSessionId: id, title: 'T', lastActivityAt: last, cwd: projectRoot, transcriptUnavailable: true });
@@ -99,8 +105,8 @@ function conflictFixture({ primary }) {
   const cfgA = { vaultDir, machineId: 'mA', machineName: 'A', settings: {}, projects: [{ id: 'P', name: 'Proj', localPath: rootA }] };
   pushAll(cfgA, A.paths);
 
-  // B has a DIVERGENT local copy that is OLDER by timestamp.
-  const bLines = seedSession(B, rootB, S, { extra: ' + B-only edit', last: 100, recentsId: 'rb' });
+  // B has an UNRELATED local copy (true conflict) that is OLDER by timestamp.
+  const bLines = seedSession(B, rootB, S, { extra: ' + B-only edit', last: 100, recentsId: 'rb', unrelated: true });
 
   if (primary) registerMachine(vaultDir, primary, primary === 'mA' ? 'A' : 'B', 'primary');
   const cfgB = { vaultDir, machineId: 'mB', machineName: 'B', settings: { autoMerge: true }, projects: [{ id: 'P', name: 'Proj', localPath: rootB }] };
@@ -135,7 +141,7 @@ test('incoming is from the primary: vault wins even if timestamps favored local'
   seedSession(A, rootA, S, { last: 100, recentsId: 'ra' }); // vault copy older
   const cfgA = { vaultDir, machineId: 'mA', machineName: 'A', settings: {}, projects: [{ id: 'P', name: 'Proj', localPath: rootA }] };
   pushAll(cfgA, A.paths);
-  const bLines = seedSession(B, rootB, S, { extra: ' + newer B edit', last: 900, recentsId: 'rb' }); // local newer
+  const bLines = seedSession(B, rootB, S, { extra: ' + newer B edit', last: 900, recentsId: 'rb', unrelated: true }); // local newer, unrelated
   registerMachine(vaultDir, 'mA', 'A', 'primary');
 
   const cfgB = { vaultDir, machineId: 'mB', machineName: 'B', settings: { autoMerge: true }, projects: [{ id: 'P', name: 'Proj', localPath: rootB }] };
