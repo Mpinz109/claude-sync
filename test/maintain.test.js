@@ -28,7 +28,12 @@ function makeMachine() {
   };
   return { root, paths };
 }
-const fwd = (p) => p.replace(/\\/g, '/');
+// A spelling of the same path that differs as a raw string but normalizes
+// equal. On Windows the real-world variant is forward slashes; on POSIX,
+// path.join already emits forward slashes (a slash swap is a no-op there and
+// the tests would assert nothing — exactly the gap Linux CI caught), so use a
+// trailing slash instead.
+const fwd = (p) => (process.platform === 'win32' ? p.replace(/\\/g, '/') : `${p}/`);
 
 // ---------- the GUI bug: linked project re-detected via slash variant ----------
 test('discoverProjects: slash variant of a LINKED path is not re-detected', () => {
