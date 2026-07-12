@@ -2,7 +2,9 @@ name: build
 
 on:
   push:
-    tags: ['v*']          # tagging a version builds + releases installers
+    branches: [main]       # tests on every push to main
+    tags: ['v*']           # tagging a version builds + releases installers
+  pull_request: {}         # tests on PRs
   workflow_dispatch: {}    # or run manually for a dry build
 
 jobs:
@@ -11,11 +13,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '20' }
+        with: { node-version: '22' }
       - run: npm install
       - run: npm test
 
   build:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: test
     strategy:
       fail-fast: false
