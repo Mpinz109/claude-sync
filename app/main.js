@@ -8,6 +8,7 @@ import { gatherStatus } from '../src/status.js';
 import { loadConfig, saveConfig, setSetting, addProject, linkProjects } from '../src/config.js';
 import { initVault } from '../src/vault.js';
 import { pushAll, pullAll, syncAll, discoverProjects, adoptFromVault, status as syncStatus } from '../src/sync.js';
+import { runSync } from '../src/run.js';
 import { Syncthing } from '../src/syncthing.js';
 
 // Lazy singleton: start the managed Syncthing on first need, reuse after.
@@ -73,6 +74,7 @@ ipcMain.handle('engine:syncStatus', () => syncStatus());
 ipcMain.handle('engine:push', () => pushAll());
 ipcMain.handle('engine:pull', (_e, opts) => pullAll(undefined, undefined, opts || { dryRun: true }));
 ipcMain.handle('engine:syncAll', (_e, opts) => syncAll(undefined, undefined, opts || {}));
+ipcMain.handle('engine:runSync', (_e, opts) => runSync(opts || {}));
 ipcMain.handle('engine:discover', () => discoverProjects());
 ipcMain.handle('engine:adopt', () => adoptFromVault());
 ipcMain.handle('engine:linkAll', (_e, list) => linkProjects(list));

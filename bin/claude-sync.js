@@ -12,6 +12,7 @@ import { tidyRegistration, dedupeVault } from '../src/maintain.js';
 import { Relay, DEFAULT_PORT } from '../src/relay.js';
 import { S3, loadAwsCreds } from '../src/s3.js';
 import { cloudPush, cloudPull, cloudSync } from '../src/cloud.js';
+import { runSync, summarizeRun, SYNC_MODES } from '../src/run.js';
 import * as schedule from '../src/schedule.js';
 import * as gitsync from '../src/gitsync.js';
 import { c, ok, warn, bad } from '../src/util.js';
@@ -271,6 +272,27 @@ function filesCmd() {
   }
 }
 
+async function syncCmd() {
+  const mi = args.indexOf('--mode');
+  const mode = mi >= 0 ? args[mi + 1] : undefined;
+  if (mode && !SYNC_MODES.includes(mode)) { console.log(bad(`--mode must be one of: ${SYNC_MODES.join(' | ')}`)); return; }
+  try {
+    const report = await runSync({ mode, force: args.includes('--force') });
+    for (const s of report.steps) {
+      if (s.skipped) { console.log(warn(`${s.step}: skipped — ${s.skipped}`)); continue; }
+      if (s.step === 'cloud-pull') console.log(ok(`cloud pull: downloaded ${s.downloaded.length}, unchanged ${s.unchanged}`));
+      else if (s.step === 'cloud-push') console.log(ok(`cloud push: uploaded ${s.uploaded.length}, unchanged ${s.unchanged}`));
+      else if (s.step === 'push') for (const r of s.results) console.log(ok(`push ${r.project}: new ${r.pushed.length}, updated ${r.updated?.length ?? 0}`));
+      else if (s.step === 'pull') for (const r of s.results) {
+        let line = `pull ${r.project}: pulled ${r.pulled.length}, merged ${r.merged?.length ?? 0}`;
+        if (r.conflicts?.length) line += `, ${r.conflicts.length} conflict(s)`;
+        console.log((r.conflicts?.length ? warn : ok)(line));
+      }
+    }
+    console.log(c.bold(`\n${summarizeRun(report)}`));
+  } catch (e) { console.log(bad(`sync failed: ${e.message.split('\n')[0]}`)); }
+}
+
 function configCmd() {
   const [key, ...rest] = args;
   const cfg = loadConfig();
@@ -340,6 +362,7 @@ function help() {
   status                       what would push / pull
   push                         local -> vault (safe, additive)
   pull [--yes] [--force]       vault -> local (dry-run unless --yes; needs Claude closed)
+  sync [--mode push|push-cloud|full]  run the configured syncMode pipeline (cloud pull -> pull -> push -> cloud push)
   schedule install|status|remove   daily push-only background job (settings.scheduleAt)
   files status|push|pull       sync project FILES via git (remote ff, or vault bundles)
   project [list|on|off <name>]  per-project sync switch (off = excluded from push/pull/status)
@@ -352,7 +375,7 @@ function help() {
 GUI: \`npm run app\`.  Architecture: DESIGN.md.`);
 }
 
-const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, cloud: cloudCmd, config: configCmd, tidy, relay: relayCmd, help, '--help': help, '-h': help };
+const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, sync: syncCmd, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, cloud: cloudCmd, config: configCmd, tidy, relay: relayCmd, help, '--help': help, '-h': help };
 
 (async () => {
   const fn = table[cmd] || (cmd ? () => { console.log(bad(`unknown command: ${cmd}`)); help(); } : help);

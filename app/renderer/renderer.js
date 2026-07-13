@@ -16,6 +16,7 @@ if (!window.api) {
     setSetting: async () => {}, setVault: async () => {}, addProject: async () => {},
     push: async () => ({ ok: false }), pull: async () => ({ ok: false }),
     syncAll: async () => ({ push: [], pull: { blocked: false, results: [] } }),
+    runSync: async () => ({ mode: 'push', steps: [{ step: 'push', results: [] }] }),
     discover: async () => ([{ name: 'Example Project', localPath: 'C:\\…\\Example Project' }]),
     linkAll: async () => ({ added: 0, total: 0 }),
     openExternal: async () => {}, onAction: () => {},
@@ -62,7 +63,7 @@ async function renderStatus() {
       <div class="label">Sync</div>
       <div class="kv"><span class="k">Linked projects</span><span class="v">${s.projects.length}</span></div>
       <div class="kv"><span class="k">Paired devices</span><span class="v">${s.devices.length}</span></div>
-      <div class="kv"><span class="k">Daily run</span><span class="v">${s.settings.scheduleAt} ${s.settings.schedulePushOnly ? '(push only)' : '(full)'}</span></div>
+      <div class="kv"><span class="k">Daily run</span><span class="v">${s.settings.scheduleAt} (${{ push: 'publish only', 'push-cloud': 'publish + cloud', full: 'full two-way' }[s.settings.syncMode] || s.settings.syncMode})</span></div>
     </div>`;
 }
 
@@ -111,7 +112,8 @@ async function renderSettings() {
   const cfg = await window.api.getConfig();
   const st = cfg.settings;
   $('#scheduleAt').value = st.scheduleAt;
-  $('#schedulePushOnly').checked = st.schedulePushOnly;
+  const modeRadio = document.querySelector(`input[name="syncMode"][value="${st.syncMode || 'push'}"]`);
+  if (modeRadio) modeRadio.checked = true;
   $('#autoMergeIfNoConflicts').checked = st.autoMergeIfNoConflicts;
   $('#promptOnOpen').checked = st.promptOnOpen;
   $('#autoMerge').checked = st.autoMerge;
@@ -133,7 +135,10 @@ function bindSetting(id, key, kind = 'check') {
   await renderProjects();
   await renderSettings();
   bindSetting('scheduleAt', 'scheduleAt', 'value');
-  bindSetting('schedulePushOnly', 'schedulePushOnly');
+  $$('input[name="syncMode"]').forEach((el) => el.addEventListener('change', async () => {
+    if (el.checked) await window.api.setSetting('syncMode', el.value);
+    await renderStatus();
+  }));
   bindSetting('autoMergeIfNoConflicts', 'autoMergeIfNoConflicts');
   bindSetting('promptOnOpen', 'promptOnOpen');
   bindSetting('autoMerge', 'autoMerge');
@@ -160,13 +165,36 @@ function bindSetting(id, key, kind = 'check') {
   });
 
   async function doSyncAll(btn) {
-    const labels = { '#syncNow': 'Sync all projects', '#syncAll': 'Sync all projects' };
     const orig = btn.textContent;
     btn.textContent = 'Syncing…'; btn.disabled = true;
-    const res = await window.api.syncAll();
-    $('#syncResult').textContent = summarizeSync(res);
+    try {
+      const report = await window.api.runSync();
+      $('#syncResult').textContent = summarizeRun(report);
+    } catch (e) {
+      $('#syncResult').textContent = `Sync failed: ${e.message || e}`;
+    }
     await renderStatus();
     btn.textContent = orig; btn.disabled = false;
+  }
+
+  function summarizeRun(report) {
+    const parts = [];
+    for (const s of report.steps || []) {
+      if (s.skipped) { parts.push(`${s.step} skipped (${s.skipped})`); continue; }
+      if (s.step === 'cloud-pull') parts.push(`cloud: got ${s.downloaded.length}`);
+      else if (s.step === 'cloud-push') parts.push(`cloud: sent ${s.uploaded.length}`);
+      else if (s.step === 'push') {
+        const n = s.results.reduce((a, r) => a + r.pushed.length, 0);
+        const u = s.results.reduce((a, r) => a + (r.updated?.length || 0), 0);
+        parts.push(`published ${n}${u ? ` (+${u} updated)` : ''}`);
+      } else if (s.step === 'pull') {
+        const n = s.results.reduce((a, r) => a + r.pulled.length, 0);
+        const m = s.results.reduce((a, r) => a + (r.merged?.length || 0), 0);
+        const c2 = s.results.reduce((a, r) => a + (r.conflicts?.length || 0), 0);
+        parts.push(`pulled ${n}${m ? `, merged ${m}` : ''}${c2 ? `, ${c2} conflict(s)` : ''}`);
+      }
+    }
+    return `Done (${report.mode}): ${parts.join(' · ') || 'nothing to do'}.`;
   }
   $('#syncNow').addEventListener('click', (e) => doSyncAll(e.target));
   $('#syncAll').addEventListener('click', (e) => doSyncAll(e.target));
