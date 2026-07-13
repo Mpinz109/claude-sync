@@ -108,3 +108,8 @@ test('planInstall: mode push schedules bare push; richer modes schedule sync --u
   assert.ok(macFull.plist.includes('<string>sync</string>'));
   assert.ok(macFull.plist.includes('<string>--unattended</string>'));
 });
+
+test('planInstall: pull mode also schedules sync --unattended', () => {
+  const p = planInstall({ scheduleAt: '03:00', syncMode: 'pull' }, { platform: 'win32', node: NODE, cliPath: CLI, runAsNode: false });
+  assert.ok(p.xml.includes(`"${CLI}" sync --unattended`));
+});

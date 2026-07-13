@@ -17,6 +17,7 @@ if (!window.api) {
     push: async () => ({ ok: false }), pull: async () => ({ ok: false }),
     syncAll: async () => ({ push: [], pull: { blocked: false, results: [] } }),
     runSync: async () => ({ mode: 'push', steps: [{ step: 'push', results: [] }] }),
+    setProjectSync: async () => ({ ok: true }),
     discover: async () => ([{ name: 'Example Project', localPath: 'C:\\…\\Example Project' }]),
     linkAll: async () => ({ added: 0, total: 0 }),
     openExternal: async () => {}, onAction: () => {},
@@ -38,6 +39,17 @@ $$('.nav').forEach((btn) => {
 
 function pill(good, goodText, badText) {
   return `<span class="pill ${good ? 'ok' : 'warn'}">${good ? goodText : badText}</span>`;
+}
+
+// ---- saved-feedback toast ----
+let toastTimer = null;
+function flash(msg) {
+  const t = $('#toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
 }
 
 // ---- Status ----
@@ -63,7 +75,7 @@ async function renderStatus() {
       <div class="label">Sync</div>
       <div class="kv"><span class="k">Linked projects</span><span class="v">${s.projects.length}</span></div>
       <div class="kv"><span class="k">Paired devices</span><span class="v">${s.devices.length}</span></div>
-      <div class="kv"><span class="k">Daily run</span><span class="v">${s.settings.scheduleAt} (${{ push: 'publish only', 'push-cloud': 'publish + cloud', full: 'full two-way' }[s.settings.syncMode] || s.settings.syncMode})</span></div>
+      <div class="kv"><span class="k">Daily run</span><span class="v">${s.settings.scheduleAt} (${{ push: 'publish only', pull: 'pull only', 'push-cloud': 'publish + cloud', full: 'full two-way' }[s.settings.syncMode] || s.settings.syncMode})</span></div>
     </div>`;
 }
 
@@ -84,8 +96,23 @@ async function renderProjects() {
   const cfg = await window.api.getConfig();
   const list = $('#projectList');
   list.innerHTML = cfg.projects.length
-    ? cfg.projects.map((p) => `<div class="card"><div class="kv"><span class="k">${p.name}</span><span class="v">${p.localPath}</span></div></div>`).join('')
+    ? cfg.projects.map((p, i) => `
+      <div class="card proj-row">
+        <div class="info">
+          <div>${p.name}</div>
+          <div class="path">${p.localPath}</div>
+        </div>
+        <label class="switch" title="Sync this project">
+          <input type="checkbox" data-proj="${encodeURIComponent(p.localPath)}" data-name="${p.name.replace(/"/g, '&quot;')}" ${p.syncEnabled !== false ? 'checked' : ''} />
+          <span class="slider"></span>
+        </label>
+      </div>`).join('')
     : 'No projects linked yet.';
+  list.querySelectorAll('input[data-proj]').forEach((el) => el.addEventListener('change', async () => {
+    const r = await window.api.setProjectSync(decodeURIComponent(el.dataset.proj), el.checked);
+    flash(r ? `${el.dataset.name}: sync ${el.checked ? 'on' : 'off'}` : 'Could not update project');
+    await renderStatus();
+  }));
   const discovered = await window.api.discover();
   const dl = $('#discoverList');
   dl.innerHTML = discovered.length
@@ -119,12 +146,19 @@ async function renderSettings() {
   $('#autoMerge').checked = st.autoMerge;
   $('#awsDiscovery').value = st.awsDiscovery || '';
 }
+const SETTING_LABELS = {
+  scheduleAt: 'Daily run time', autoMergeIfNoConflicts: 'Auto-merge clean changes',
+  promptOnOpen: 'Ask on open', autoMerge: 'Auto-resolve conflicts', awsDiscovery: 'Self-hosted relay',
+};
 function bindSetting(id, key, kind = 'check') {
   const el = $(`#${id}`);
-  const ev = kind === 'check' ? 'change' : 'change';
-  el.addEventListener(ev, async () => {
+  if (!el) return;
+  el.addEventListener('change', async () => {
     const val = kind === 'check' ? el.checked : el.value;
     await window.api.setSetting(key, val);
+    const label = SETTING_LABELS[key] || key;
+    flash(kind === 'check' ? `${label}: ${val ? 'on' : 'off'} — saved` : `${label} saved`);
+    await renderStatus();
   });
 }
 
@@ -135,8 +169,11 @@ function bindSetting(id, key, kind = 'check') {
   await renderProjects();
   await renderSettings();
   bindSetting('scheduleAt', 'scheduleAt', 'value');
+  const MODE_LABELS = { push: 'Publish only', pull: 'Pull only', 'push-cloud': 'Publish + cloud', full: 'Full two-way' };
   $$('input[name="syncMode"]').forEach((el) => el.addEventListener('change', async () => {
-    if (el.checked) await window.api.setSetting('syncMode', el.value);
+    if (!el.checked) return;
+    await window.api.setSetting('syncMode', el.value);
+    flash(`Sync mode: ${MODE_LABELS[el.value]} — saved`);
     await renderStatus();
   }));
   bindSetting('autoMergeIfNoConflicts', 'autoMergeIfNoConflicts');
