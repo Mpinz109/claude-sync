@@ -105,7 +105,11 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
   const home = paths.home;
   const settings = cfg.settings || {};
   const autoMerge = settings.autoMerge === true;
-  const applyClean = settings.autoMergeIfNoConflicts !== false; // default true
+  // Incoming-changes policy: 'merge' (lossless union, default), 'ff-only'
+  // (apply only when THIS machine hasn't changed the session — fast-forward),
+  // 'manual' (report only). Legacy autoMergeIfNoConflicts=false maps to manual.
+  const policy = settings.incomingPolicy || (settings.autoMergeIfNoConflicts === false ? 'manual' : 'merge');
+  const applyClean = policy !== 'manual';
 
   let primaryId = null;
   try { primaryId = vault.getPrimaryMachineId(cfg.vaultDir); } catch { /* no vault meta */ }
@@ -154,7 +158,11 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
     const m = mergeTranscripts(localRaw0, vaultLocalized);
     if (m.related) {
       if (m.identical || !m.aChanged) { skipped.push(cliSessionId); continue; } // local is already a superset; push will update the vault
-      if (!applyClean) { available.push(cliSessionId); continue; }               // lossless, but the user said don't auto-apply
+      if (!applyClean) { available.push(cliSessionId); continue; }               // manual: report only
+      // ff-only: bChanged means the merge result differs from the vault copy,
+      // i.e. THIS machine contributed changes too — not a pure fast-forward.
+      // Defer it rather than mixing content the user said not to touch.
+      if (policy === 'ff-only' && m.bChanged) { available.push(cliSessionId); continue; }
       if (dryRun) { merged.push(cliSessionId); continue; }
       local.snapshotLocalTranscript(paths, project.localPath, cliSessionId);     // undo insurance before touching a live transcript
       local.writeLocalTranscript(paths, project.localPath, cliSessionId, m.text);

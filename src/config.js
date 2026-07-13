@@ -24,8 +24,9 @@ export function normalizePath(p) {
 }
 
 export const DEFAULT_SETTINGS = {
-  autoMerge: false,             // auto-resolve conflicts by newest, loser kept as .fork
-  autoMergeIfNoConflicts: true, // apply clean incoming changes without asking
+  autoMerge: false,             // auto-resolve UNRELATED conflicts by newest, loser kept as .fork
+  autoMergeIfNoConflicts: true, // legacy boolean; superseded by incomingPolicy (kept for back-compat)
+  incomingPolicy: 'merge',      // 'ff-only' (apply only if unchanged here) | 'merge' (lossless union) | 'manual' (report only)
   promptOnOpen: true,           // run the pull prompt when Claude opens
   scheduleAt: '03:00',          // daily background job time
   schedulePushOnly: true,       // legacy toggle; superseded by syncMode (kept for back-compat)
@@ -64,6 +65,8 @@ export function loadConfig() {
   // Back-compat: users who had turned OFF push-only before syncMode existed
   // clearly wanted two-way — carry that intent forward.
   if (raw.syncMode == null && raw.schedulePushOnly === false) cfg.settings.syncMode = 'full';
+  // Back-compat: autoMergeIfNoConflicts=false predates incomingPolicy.
+  if (raw.incomingPolicy == null && raw.autoMergeIfNoConflicts === false) cfg.settings.incomingPolicy = 'manual';
   // Back-compat: projects linked before per-project sync existed are enabled.
   cfg.projects = (cfg.projects || []).map((p) => ({ ...p, syncEnabled: p.syncEnabled !== false }));
   return cfg;
