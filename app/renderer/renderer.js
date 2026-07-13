@@ -2,7 +2,7 @@
 
 // Fallback so the shell renders in a plain browser / preview (no Electron engine).
 if (!window.api) {
-  const demoSettings = { scheduleAt: '03:00', schedulePushOnly: true, autoMergeIfNoConflicts: true, promptOnOpen: true, autoMerge: false, awsDiscovery: '' };
+  const demoSettings = { scheduleAt: '03:00', schedulePushOnly: true, autoMergeIfNoConflicts: true, incomingPolicy: 'merge', syncMode: 'push', promptOnOpen: true, autoMerge: false, awsDiscovery: '' };
   window.api = {
     status: async () => ({
       machineName: 'this-computer', platform: '(preview)', vaultDir: null, claudeRunning: false,
@@ -136,6 +136,12 @@ function summarizeSync(res) {
 
 // ---- Schedule + Settings (two-way bound to config) ----
 const MODE_LABELS = { push: 'Publish only', pull: 'Pull only', 'push-cloud': 'Publish + cloud', full: 'Full two-way' };
+const POLICY_LABELS = { 'ff-only': 'Apply only if unchanged here', merge: 'Merge lossless', manual: 'Tell me only' };
+const POLICY_HINTS = {
+  'ff-only': 'Incoming updates apply only when this computer hasn’t touched that conversation. If both sides changed it, yours is left alone and it’s reported instead.',
+  merge: 'Divergent conversations are combined losslessly — nothing from either side is ever discarded, and an undo snapshot is written first.',
+  manual: 'Nothing is ever applied automatically; incoming changes are only reported.',
+};
 const MODE_HINTS = {
   push: 'Uploads this computer’s new conversations. Never touches Claude’s local data.',
   pull: 'Receives other computers’ conversations; publishes nothing. The merge step skips itself if Claude is open.',
@@ -150,7 +156,9 @@ async function renderSettings() {
   const mode = st.syncMode || 'push';
   $('#syncMode').value = mode;
   $('#syncModeHint').textContent = MODE_HINTS[mode] || '';
-  $('#autoMergeIfNoConflicts').checked = st.autoMergeIfNoConflicts;
+  const policy = st.incomingPolicy || (st.autoMergeIfNoConflicts === false ? 'manual' : 'merge');
+  $('#incomingPolicy').value = policy;
+  $('#incomingPolicyHint').textContent = POLICY_HINTS[policy] || '';
   $('#promptOnOpen').checked = st.promptOnOpen;
   $('#autoMerge').checked = st.autoMerge;
   $('#awsDiscovery').value = st.awsDiscovery || '';
@@ -185,7 +193,13 @@ function bindSetting(id, key, kind = 'check') {
     flash(`Sync mode: ${MODE_LABELS[mode]} — saved`);
     await renderStatus();
   });
-  bindSetting('autoMergeIfNoConflicts', 'autoMergeIfNoConflicts');
+  $('#incomingPolicy').addEventListener('change', async () => {
+    const policy = $('#incomingPolicy').value;
+    await window.api.setSetting('incomingPolicy', policy);
+    $('#incomingPolicyHint').textContent = POLICY_HINTS[policy] || '';
+    flash(`Incoming changes: ${POLICY_LABELS[policy]} — saved`);
+    await renderStatus();
+  });
   bindSetting('promptOnOpen', 'promptOnOpen');
   bindSetting('autoMerge', 'autoMerge');
   bindSetting('awsDiscovery', 'awsDiscovery', 'value');

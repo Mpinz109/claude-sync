@@ -203,3 +203,34 @@ test('fresh machine with no recents structure still gets a tile (recentsDirRel f
   assert.ok(fs.existsSync(guidDir), 'acct/org structure recreated from vault meta');
   assert.ok(fs.readdirSync(guidDir).some((f) => f.endsWith('.json')), 'tile written');
 });
+
+// ---------- incomingPolicy: ff-only (apply only if unchanged here) ----------
+test('ff-only: pure fast-forward from the vault is applied', () => {
+  const s = setup({ localKind: 'diverged' });
+  // Rewind B's local copy to the shared base — B has changed nothing itself.
+  writeText(tFile(s.B, s.projB.localPath, S), baseLines(s.projB.localPath).join('\n'));
+  const r = pullProject(cfgB(s.vault, s.projB, { incomingPolicy: 'ff-only' }), s.projB, s.B.paths, { dryRun: false });
+  assert.deepEqual(r.merged, [S], 'fast-forward applied');
+  assert.ok(readText(tFile(s.B, s.projB.localPath, S)).includes('EXTRA from A'));
+});
+
+test('ff-only: true divergence is deferred, local untouched', () => {
+  const s = setup({ localKind: 'diverged' }); // both sides have their own extra entry
+  const r = pullProject(cfgB(s.vault, s.projB, { incomingPolicy: 'ff-only' }), s.projB, s.B.paths, { dryRun: false });
+  assert.ok(r.available.includes(S), 'deferred, not merged');
+  assert.deepEqual(r.merged, []);
+  assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bText, 'local untouched');
+});
+
+test('ff-only: brand-new incoming sessions still apply', () => {
+  const s = setup({ localKind: 'ahead', cleanIncoming: true });
+  const r = pullProject(cfgB(s.vault, s.projB, { incomingPolicy: 'ff-only' }), s.projB, s.B.paths, { dryRun: false });
+  assert.ok(r.pulled.includes(T), 'new session T applied (nothing local to protect)');
+});
+
+test('legacy autoMergeIfNoConflicts=false still maps to manual', () => {
+  const s = setup({ localKind: 'diverged' });
+  const r = pullProject(cfgB(s.vault, s.projB, { autoMergeIfNoConflicts: false }), s.projB, s.B.paths, { dryRun: false });
+  assert.ok(r.available.includes(S));
+  assert.deepEqual(r.merged, []);
+});
