@@ -90,9 +90,19 @@
           <span class="muted small">Applies to the daily background run, the Sync buttons, and <code>claude-sync sync</code>. Re-run "schedule install" after changing the mode so the background job matches.</span>
         </div>
         <div class="card">
-          <label class="check"><input type="checkbox" id="autoMergeIfNoConflicts" /> Auto-merge changes that don't conflict</label>
-          <label class="check"><input type="checkbox" id="promptOnOpen" /> Ask me about incoming changes when I open Claude</label>
-          <label class="check"><input type="checkbox" id="autoMerge" /> Auto-resolve conflicts by newest (keeps the other copy as a backup)</label>
+          <div class="label">Merge behavior</div>
+          <div class="toggle-row">
+            <div class="info">Auto-merge changes that don't conflict<div class="path">Safe incoming updates are applied without asking.</div></div>
+            <label class="switch"><input type="checkbox" id="autoMergeIfNoConflicts" /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <div class="info">Ask me about incoming changes when I open Claude<div class="path">Shows a prompt instead of applying silently.</div></div>
+            <label class="switch"><input type="checkbox" id="promptOnOpen" /><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <div class="info">Auto-resolve conflicts by newest<div class="path">The other copy is always kept as a backup, never deleted.</div></div>
+            <label class="switch"><input type="checkbox" id="autoMerge" /><span class="slider"></span></label>
+          </div>
         </div>
         <div class="card">
           <div class="label">Self-hosted relay (optional)</div>

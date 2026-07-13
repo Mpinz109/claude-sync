@@ -80,6 +80,11 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 #toast.show { opacity: 1; transform: translateY(0); }
 
+/* settings toggle rows */
+.toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 4px 0; }
+.toggle-row .info { flex: 1; min-width: 0; }
+.toggle-row .path { color: var(--muted); font-size: 12px; }
+
 /* per-project sync toggle */
 .proj-row { display: flex; align-items: center; gap: 12px; }
 .proj-row .info { flex: 1; min-width: 0; }
