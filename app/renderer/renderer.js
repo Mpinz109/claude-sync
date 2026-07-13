@@ -135,12 +135,21 @@ function summarizeSync(res) {
 }
 
 // ---- Schedule + Settings (two-way bound to config) ----
+const MODE_LABELS = { push: 'Publish only', pull: 'Pull only', 'push-cloud': 'Publish + cloud', full: 'Full two-way' };
+const MODE_HINTS = {
+  push: 'Uploads this computer’s new conversations. Never touches Claude’s local data.',
+  pull: 'Receives other computers’ conversations; publishes nothing. The merge step skips itself if Claude is open.',
+  'push-cloud': 'Publishes, plus mirrors the vault to your S3 bucket both ways. Never touches Claude’s local data.',
+  full: 'Publishes AND merges incoming conversations into Claude. The merge step skips itself if Claude is open.',
+};
+
 async function renderSettings() {
   const cfg = await window.api.getConfig();
   const st = cfg.settings;
   $('#scheduleAt').value = st.scheduleAt;
-  const modeRadio = document.querySelector(`input[name="syncMode"][value="${st.syncMode || 'push'}"]`);
-  if (modeRadio) modeRadio.checked = true;
+  const mode = st.syncMode || 'push';
+  $('#syncMode').value = mode;
+  $('#syncModeHint').textContent = MODE_HINTS[mode] || '';
   $('#autoMergeIfNoConflicts').checked = st.autoMergeIfNoConflicts;
   $('#promptOnOpen').checked = st.promptOnOpen;
   $('#autoMerge').checked = st.autoMerge;
@@ -169,13 +178,13 @@ function bindSetting(id, key, kind = 'check') {
   await renderProjects();
   await renderSettings();
   bindSetting('scheduleAt', 'scheduleAt', 'value');
-  const MODE_LABELS = { push: 'Publish only', pull: 'Pull only', 'push-cloud': 'Publish + cloud', full: 'Full two-way' };
-  $$('input[name="syncMode"]').forEach((el) => el.addEventListener('change', async () => {
-    if (!el.checked) return;
-    await window.api.setSetting('syncMode', el.value);
-    flash(`Sync mode: ${MODE_LABELS[el.value]} — saved`);
+  $('#syncMode').addEventListener('change', async () => {
+    const mode = $('#syncMode').value;
+    await window.api.setSetting('syncMode', mode);
+    $('#syncModeHint').textContent = MODE_HINTS[mode] || '';
+    flash(`Sync mode: ${MODE_LABELS[mode]} — saved`);
     await renderStatus();
-  }));
+  });
   bindSetting('autoMergeIfNoConflicts', 'autoMergeIfNoConflicts');
   bindSetting('promptOnOpen', 'promptOnOpen');
   bindSetting('autoMerge', 'autoMerge');

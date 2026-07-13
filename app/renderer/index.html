@@ -13,7 +13,6 @@
       <button class="nav active" data-screen="status">Status</button>
       <button class="nav" data-screen="devices">Devices</button>
       <button class="nav" data-screen="projects">Projects</button>
-      <button class="nav" data-screen="schedule">Schedule</button>
       <button class="nav" data-screen="settings">Settings</button>
       <div class="spacer"></div>
       <button id="syncNow" class="primary">Sync all</button>
@@ -69,27 +68,27 @@
         <div id="discoverList" class="muted">—</div>
       </section>
 
-      <!-- SCHEDULE -->
-      <section class="screen hidden" id="screen-schedule">
-        <h1>Schedule</h1>
-        <p class="muted">When the background sync runs. It only <strong>publishes</strong> your changes (safe, unattended); incoming changes are merged when you open Claude.</p>
-        <div class="card">
-          <div class="row">
-            <label for="scheduleAt">Run daily at</label>
-            <input type="time" id="scheduleAt" />
-          </div>
-          <div class="label" style="margin-top:8px">Sync mode</div>
-          <label class="check"><input type="radio" name="syncMode" value="push" /> <span><strong>Publish only</strong> <span class="muted">— upload this computer's new conversations. Never touches Claude's local data. Safest.</span></span></label>
-          <label class="check"><input type="radio" name="syncMode" value="pull" /> <span><strong>Pull only</strong> <span class="muted">— receive other computers' conversations; publishes nothing from this machine. The merge step skips itself if Claude is open.</span></span></label>
-          <label class="check"><input type="radio" name="syncMode" value="push-cloud" /> <span><strong>Publish + cloud</strong> <span class="muted">— publish, plus mirror the vault to your S3 bucket both ways. Never touches Claude's local data.</span></span></label>
-          <label class="check"><input type="radio" name="syncMode" value="full" /> <span><strong>Full two-way</strong> <span class="muted">— publish AND merge incoming conversations into Claude. The merge step skips itself if Claude is open.</span></span></label>
-          <span class="muted small">Applies to the scheduled run, the Sync buttons, and <code>claude-sync sync</code>. Re-run "schedule install" after changing modes so the background job matches.</span>
-        </div>
-      </section>
-
       <!-- SETTINGS -->
       <section class="screen hidden" id="screen-settings">
         <h1>Settings</h1>
+        <div class="card">
+          <div class="label">Syncing</div>
+          <div class="row">
+            <label for="syncMode">Sync mode</label>
+            <select id="syncMode">
+              <option value="push">Publish only (safest)</option>
+              <option value="pull">Pull only (receive, never publish)</option>
+              <option value="push-cloud">Publish + cloud mirror</option>
+              <option value="full">Full two-way</option>
+            </select>
+          </div>
+          <div id="syncModeHint" class="muted small"></div>
+          <div class="row" style="margin-top:6px">
+            <label for="scheduleAt">Run daily at</label>
+            <input type="time" id="scheduleAt" />
+          </div>
+          <span class="muted small">Applies to the daily background run, the Sync buttons, and <code>claude-sync sync</code>. Re-run "schedule install" after changing the mode so the background job matches.</span>
+        </div>
         <div class="card">
           <label class="check"><input type="checkbox" id="autoMergeIfNoConflicts" /> Auto-merge changes that don't conflict</label>
           <label class="check"><input type="checkbox" id="promptOnOpen" /> Ask me about incoming changes when I open Claude</label>
