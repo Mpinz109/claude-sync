@@ -96,3 +96,14 @@ test('summarizeRun renders a one-liner with counts', async () => {
   const line = summarizeRun(r);
   assert.match(line, /^\[push\] pushed 1/);
 });
+
+test('mode pull: receive-only — cloud pull + engine pull, never publishes', async () => {
+  const { cfg, paths } = machine();
+  const s3 = new FakeS3();
+  const cloud = { vaultDir: cfg.vaultDir, s3, prefix: 'vault/', passphrase: '' };
+  const r = await runSync({ mode: 'pull', cfg, paths, cloud, force: true });
+  assert.deepEqual(steps(r), ['cloud-pull', 'pull']);
+  assert.ok(!steps(r).includes('push'), 'nothing published');
+  assert.ok(!steps(r).includes('cloud-push'), 'nothing mirrored up');
+  assert.equal([...s3.objects.keys()].length, 0, 'bucket untouched by a pull-only machine');
+});

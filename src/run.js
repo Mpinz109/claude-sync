@@ -3,9 +3,11 @@
 // and the scheduled background job.
 //
 //   push        engine push only (publish local sessions to the local vault)
+//   pull        receive only: cloud pull -> engine pull (SKIPS itself if
+//               Claude is running, unless forced). Never publishes.
 //   push-cloud  cloud pull -> engine push -> cloud push (never writes Claude
 //               state, safe unattended with Claude open)
-//   full        cloud pull -> engine pull (SKIPS itself if Claude is running,
+//   full        cloud pull -> engine pull (skips if Claude is running,
 //               unless forced) -> engine push -> cloud push
 //
 // Every step lands in report.steps so callers can render exactly what happened.
@@ -16,7 +18,7 @@ import { pushAll, pullAll } from './sync.js';
 import { S3, loadAwsCreds } from './s3.js';
 import { cloudPush, cloudPull } from './cloud.js';
 
-export const SYNC_MODES = ['push', 'push-cloud', 'full'];
+export const SYNC_MODES = ['push', 'pull', 'push-cloud', 'full'];
 
 /** Build the cloud mirror context from settings, or explain why not. */
 export function cloudContext(cfg) {
@@ -53,18 +55,18 @@ export async function runSync({
   //    everything other machines already published.
   if (useCloud) report.steps.push({ step: 'cloud-pull', ...(await cloudPull(ctx)) });
 
-  // 2) Full mode: merge the vault into local Claude. pullAll blocks itself when
-  //    Claude is running (that's the safety, not a failure).
-  if (mode === 'full') {
+  // 2) Merge the vault into local Claude (full + pull modes). pullAll blocks
+  //    itself when Claude is running (that's the safety, not a failure).
+  if (mode === 'full' || mode === 'pull') {
     const r = await pullAll(cfg, paths, { dryRun: false, force });
     report.steps.push(r.blocked ? { step: 'pull', skipped: r.reason } : { step: 'pull', results: r.results });
   }
 
-  // 3) Publish local sessions (always safe).
-  report.steps.push({ step: 'push', results: pushAll(cfg, paths) });
+  // 3) Publish local sessions (every mode except receive-only pull).
+  if (mode !== 'pull') report.steps.push({ step: 'push', results: pushAll(cfg, paths) });
 
-  // 4) Mirror the now-updated vault up.
-  if (useCloud) report.steps.push({ step: 'cloud-push', ...(await cloudPush(ctx)) });
+  // 4) Mirror the now-updated vault up (pull mode published nothing, skip).
+  if (useCloud && mode !== 'pull') report.steps.push({ step: 'cloud-push', ...(await cloudPush(ctx)) });
 
   return report;
 }

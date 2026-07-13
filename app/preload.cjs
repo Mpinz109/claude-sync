@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('api', {
   pull: (opts) => ipcRenderer.invoke('engine:pull', opts),
   syncAll: (opts) => ipcRenderer.invoke('engine:syncAll', opts),
   runSync: (opts) => ipcRenderer.invoke('engine:runSync', opts),
+  setProjectSync: (key, enabled) => ipcRenderer.invoke('engine:setProjectSync', key, enabled),
   discover: () => ipcRenderer.invoke('engine:discover'),
   adopt: () => ipcRenderer.invoke('engine:adopt'),
   linkAll: (list) => ipcRenderer.invoke('engine:linkAll', list),
