@@ -94,3 +94,17 @@ test('runAsNode launchd: EnvironmentVariables dict present', () => {
 test('runAsNode cron: env prefix on the line', () => {
   assert.ok(cronLine({ ...opt, runAsNode: true }).startsWith('0 3 * * * ELECTRON_RUN_AS_NODE=1 '));
 });
+
+// ---------- syncMode-aware scheduled command ----------
+test('planInstall: mode push schedules bare push; richer modes schedule sync --unattended', () => {
+  const winPush = planInstall({ scheduleAt: '03:00', syncMode: 'push' }, { platform: 'win32', node: NODE, cliPath: CLI, runAsNode: false });
+  assert.ok(winPush.xml.includes(`"${CLI}" push`));
+  const winFull = planInstall({ scheduleAt: '03:00', syncMode: 'full' }, { platform: 'win32', node: NODE, cliPath: CLI, runAsNode: false });
+  assert.ok(winFull.xml.includes(`"${CLI}" sync --unattended`));
+  assert.equal(winFull.mode, 'full');
+  const cronCloud = planInstall({ scheduleAt: '03:00', syncMode: 'push-cloud' }, { platform: 'linux', node: NODE, cliPath: CLI, runAsNode: false });
+  assert.ok(cronCloud.line.includes(`"${CLI}" sync --unattended`));
+  const macFull = planInstall({ scheduleAt: '03:00', syncMode: 'full' }, { platform: 'darwin', node: NODE, cliPath: CLI, runAsNode: false });
+  assert.ok(macFull.plist.includes('<string>sync</string>'));
+  assert.ok(macFull.plist.includes('<string>--unattended</string>'));
+});

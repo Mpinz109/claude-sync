@@ -28,7 +28,8 @@ export const DEFAULT_SETTINGS = {
   autoMergeIfNoConflicts: true, // apply clean incoming changes without asking
   promptOnOpen: true,           // run the pull prompt when Claude opens
   scheduleAt: '03:00',          // daily background job time
-  schedulePushOnly: true,       // 3am job only publishes (safe, unattended)
+  schedulePushOnly: true,       // legacy toggle; superseded by syncMode (kept for back-compat)
+  syncMode: 'push',             // 'push' | 'push-cloud' | 'full' — what `sync` and the scheduled job do
   awsDiscovery: '',             // optional self-hosted Syncthing discovery/relay URL
   projectsRoot: '',             // folder to scan for project folders during `adopt` (seeds a fresh machine)
   machineRole: '',              // '' | 'primary' | 'secondary' — primary is the source of truth on conflicts
@@ -58,7 +59,11 @@ export function loadConfig() {
     return cfg;
   }
   const cfg = readJson(CONFIG_FILE);
-  cfg.settings = { ...DEFAULT_SETTINGS, ...(cfg.settings || {}) }; // fill new keys
+  const raw = cfg.settings || {};
+  cfg.settings = { ...DEFAULT_SETTINGS, ...raw }; // fill new keys
+  // Back-compat: users who had turned OFF push-only before syncMode existed
+  // clearly wanted two-way — carry that intent forward.
+  if (raw.syncMode == null && raw.schedulePushOnly === false) cfg.settings.syncMode = 'full';
   // Back-compat: projects linked before per-project sync existed are enabled.
   cfg.projects = (cfg.projects || []).map((p) => ({ ...p, syncEnabled: p.syncEnabled !== false }));
   return cfg;

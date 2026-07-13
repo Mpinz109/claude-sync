@@ -34,23 +34,28 @@ export function parseTime(hhmm) {
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
-/** The command to run: [node, cliPath, 'push']. push-only is unattended-safe. */
-export function buildCommandArgs({ node = process.execPath, cliPath = defaultCliPath(), sub = 'push' } = {}) {
-  return [node, cliPath, sub];
+/**
+ * The command to run. Default is push-only (unattended-safe). When the user's
+ * syncMode is push-cloud or full, the job runs `sync --unattended` instead and
+ * the mode logic (including skip-pull-while-Claude-runs) lives in src/run.js.
+ */
+export function buildCommandArgs({ node = process.execPath, cliPath = defaultCliPath(), sub = 'push', subArgs = null } = {}) {
+  return [node, cliPath, ...(subArgs || [sub])];
 }
 
 // ---------- Windows: Task Scheduler XML ----------
-export function windowsTaskXml({ time, node = process.execPath, cliPath = defaultCliPath(), runAsNode = false }) {
+export function windowsTaskXml({ time, node = process.execPath, cliPath = defaultCliPath(), runAsNode = false, subArgs = ['push'] }) {
   const { hour, minute } = parseTime(time);
   const start = `2020-01-01T${pad2(hour)}:${pad2(minute)}:00`;
+  const sub = subArgs.join(' ');
   // Command = the node exe; Arguments = the quoted script path + subcommand.
   // Packaged app: process.execPath is the Electron GUI binary, which needs
   // ELECTRON_RUN_AS_NODE=1 to behave as node. Task Scheduler's <Exec> cannot
   // set env vars, so wrap in cmd (&& XML-escaped below).
   const command = runAsNode ? 'cmd.exe' : node;
   const args = runAsNode
-    ? `/c set ELECTRON_RUN_AS_NODE=1&amp;&amp; "${node}" "${cliPath}" push`
-    : `"${cliPath}" push`;
+    ? `/c set ELECTRON_RUN_AS_NODE=1&amp;&amp; "${node}" "${cliPath}" ${sub}`
+    : `"${cliPath}" ${sub}`;
   return [
     '<?xml version="1.0" encoding="UTF-16"?>',
     '<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
@@ -78,9 +83,9 @@ export const LAUNCHD_LABEL = 'com.claude-sync.daily';
 export function launchdPlistPath(home = os.homedir()) {
   return path.join(home, 'Library', 'LaunchAgents', `${LAUNCHD_LABEL}.plist`);
 }
-export function launchdPlist({ time, node = process.execPath, cliPath = defaultCliPath(), runAsNode = false }) {
+export function launchdPlist({ time, node = process.execPath, cliPath = defaultCliPath(), runAsNode = false, subArgs = ['push'] }) {
   const { hour, minute } = parseTime(time);
-  const progArgs = buildCommandArgs({ node, cliPath }).map((a) => `    <string>${a}</string>`).join('\n');
+  const progArgs = buildCommandArgs({ node, cliPath, subArgs }).map((a) => `    <string>${a}</string>`).join('\n');
   const envBlock = runAsNode
     ? ['  <key>EnvironmentVariables</key><dict>', '    <key>ELECTRON_RUN_AS_NODE</key><string>1</string>', '  </dict>']
     : [];
@@ -104,10 +109,10 @@ export function launchdPlist({ time, node = process.execPath, cliPath = defaultC
 
 // ---------- Linux: crontab line ----------
 export const CRON_TAG = '# claude-sync-daily';
-export function cronLine({ time, node = process.execPath, cliPath = defaultCliPath(), runAsNode = false }) {
+export function cronLine({ time, node = process.execPath, cliPath = defaultCliPath(), runAsNode = false, subArgs = ['push'] }) {
   const { hour, minute } = parseTime(time);
   const env = runAsNode ? 'ELECTRON_RUN_AS_NODE=1 ' : '';
-  return `${minute} ${hour} * * * ${env}"${node}" "${cliPath}" push ${CRON_TAG}`;
+  return `${minute} ${hour} * * * ${env}"${node}" "${cliPath}" ${subArgs.join(' ')} ${CRON_TAG}`;
 }
 
 /**
@@ -116,16 +121,20 @@ export function cronLine({ time, node = process.execPath, cliPath = defaultCliPa
  */
 export function planInstall(settings = {}, { platform = process.platform, node, cliPath, home = os.homedir(), runAsNode = !!process.versions.electron } = {}) {
   const time = settings.scheduleAt || '03:00';
+  // push mode schedules the bare push; richer modes schedule the orchestrator,
+  // which handles cloud mirroring and skips the Claude-state pull if Claude is open.
+  const mode = settings.syncMode || 'push';
+  const subArgs = mode === 'push' ? ['push'] : ['sync', '--unattended'];
   if (platform === 'win32') {
-    return { platform, tool: 'schtasks', taskName: TASK_NAME, time,
-      xml: windowsTaskXml({ time, node, cliPath, runAsNode }),
+    return { platform, tool: 'schtasks', taskName: TASK_NAME, time, mode,
+      xml: windowsTaskXml({ time, node, cliPath, runAsNode, subArgs }),
       createArgs: (xmlPath) => ['/Create', '/TN', TASK_NAME, '/XML', xmlPath, '/F'] };
   }
   if (platform === 'darwin') {
-    return { platform, tool: 'launchctl', label: LAUNCHD_LABEL, time,
-      plistPath: launchdPlistPath(home), plist: launchdPlist({ time, node, cliPath, runAsNode }) };
+    return { platform, tool: 'launchctl', label: LAUNCHD_LABEL, time, mode,
+      plistPath: launchdPlistPath(home), plist: launchdPlist({ time, node, cliPath, runAsNode, subArgs }) };
   }
-  return { platform, tool: 'crontab', tag: CRON_TAG, time, line: cronLine({ time, node, cliPath, runAsNode }) };
+  return { platform, tool: 'crontab', tag: CRON_TAG, time, mode, line: cronLine({ time, node, cliPath, runAsNode, subArgs }) };
 }
 
 // ---------- execution (not unit-tested; shells out) ----------
