@@ -79,6 +79,22 @@ export function findProject(cfg, key) {
   return cfg.projects.find((p) => p.name.toLowerCase() === lk || normalizePath(p.localPath) === nk) || null;
 }
 
+/** Pure core of device removal (unit-testable): match by Syncthing id or name. */
+export function removeDeviceFrom(cfg, key) {
+  const lk = String(key).toLowerCase();
+  const i = (cfg.devices || []).findIndex((d) => d.syncthingId === key || (d.name || '').toLowerCase() === lk);
+  if (i < 0) return null;
+  return cfg.devices.splice(i, 1)[0];
+}
+
+/** Remove a paired computer from the config. Returns the removed device or null. */
+export function removeDevice(key) {
+  const cfg = loadConfig();
+  const removed = removeDeviceFrom(cfg, key);
+  if (removed) saveConfig(cfg);
+  return removed;
+}
+
 /** Turn syncing on/off for one linked project. Returns the project or null. */
 export function setProjectSync(key, enabled) {
   const cfg = loadConfig();

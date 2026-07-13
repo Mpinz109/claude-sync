@@ -18,6 +18,7 @@ if (!window.api) {
     syncAll: async () => ({ push: [], pull: { blocked: false, results: [] } }),
     runSync: async () => ({ mode: 'push', steps: [{ step: 'push', results: [] }] }),
     setProjectSync: async () => ({ ok: true }),
+    removeDevice: async () => ({ ok: true, removed: {}, syncthingCleaned: true }),
     discover: async () => ([{ name: 'Example Project', localPath: 'C:\\…\\Example Project' }]),
     linkAll: async () => ({ added: 0, total: 0 }),
     openExternal: async () => {}, onAction: () => {},
@@ -87,8 +88,23 @@ async function renderDevices() {
   const cfg = await window.api.getConfig();
   const list = $('#deviceList');
   list.innerHTML = (cfg.devices && cfg.devices.length)
-    ? cfg.devices.map((x) => `<div class="kv"><span class="k">${x.name}</span><span class="v mono">${x.syncthingId}</span></div>`).join('')
+    ? cfg.devices.map((x) => `
+      <div class="proj-row">
+        <div class="info">
+          <div>${x.name}</div>
+          <div class="path mono">${x.syncthingId}</div>
+        </div>
+        <button class="secondary" data-remove="${x.syncthingId}" data-name="${x.name.replace(/"/g, '&quot;')}">Remove</button>
+      </div>`).join('')
     : 'None yet.';
+  list.querySelectorAll('button[data-remove]').forEach((btn) => btn.addEventListener('click', async () => {
+    if (!confirm(`Remove "${btn.dataset.name}"?\n\nThis computer will stop syncing with it. Its conversations already synced here are kept. You can pair it again any time.`)) return;
+    btn.disabled = true;
+    const r = await window.api.removeDevice(btn.dataset.remove);
+    flash(r.ok ? `${btn.dataset.name} removed${r.syncthingCleaned ? '' : ' (Syncthing cleanup will finish next time it runs)'}` : `Remove failed: ${r.error}`);
+    await renderDevices();
+    await renderStatus();
+  }));
 }
 
 // ---- Projects ----

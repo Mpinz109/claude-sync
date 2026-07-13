@@ -149,3 +149,17 @@ test('incoming is from the primary: vault wins even if timestamps favored local'
   assert.equal(r.forks[0].winner, 'vault', 'primary version wins regardless of timestamp');
   assert.equal(readText(forkFile(B, rootB)), bLines, 'B\'s newer edit preserved as .fork (never destroyed)');
 });
+
+// ---------- device removal ----------
+test('removeDeviceFrom: matches by id or name (case-insensitive), null when absent', async () => {
+  const { removeDeviceFrom } = await import('../src/config.js');
+  const cfg = { devices: [
+    { name: 'Old Laptop', syncthingId: 'AAAA-BBBB' },
+    { name: 'Desktop', syncthingId: 'CCCC-DDDD' },
+  ] };
+  assert.equal(removeDeviceFrom(cfg, 'old laptop').syncthingId, 'AAAA-BBBB');
+  assert.equal(cfg.devices.length, 1, 'removed from the list');
+  assert.equal(removeDeviceFrom(cfg, 'CCCC-DDDD').name, 'Desktop');
+  assert.equal(removeDeviceFrom(cfg, 'ghost'), null);
+  assert.deepEqual(cfg.devices, []);
+});

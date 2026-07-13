@@ -136,5 +136,19 @@ export class Syncthing {
 
   async listDevices() { return this.api('GET', '/rest/config/devices'); }
 
+  /** Unpair a remote machine: drop it from every folder share, then delete it. */
+  async removeDevice(deviceId) {
+    try {
+      const folders = await this.api('GET', '/rest/config/folders');
+      for (const f of folders) {
+        if ((f.devices || []).some((d) => d.deviceID === deviceId)) {
+          f.devices = f.devices.filter((d) => d.deviceID !== deviceId);
+          await this.api('PUT', `/rest/config/folders/${f.id}`, f);
+        }
+      }
+    } catch { /* folder cleanup is best-effort */ }
+    await this.api('DELETE', `/rest/config/devices/${deviceId}`);
+  }
+
   stop() { if (this.proc) { try { this.proc.kill(); } catch { /* */ } this.proc = null; } }
 }

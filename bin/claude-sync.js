@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { resolvePaths, findBundledCli, claudeRunning } from '../src/platform.js';
-import { loadConfig, saveConfig, addProject, linkProjects, setSetting, setProjectSync } from '../src/config.js';
+import { loadConfig, saveConfig, addProject, linkProjects, setSetting, setProjectSync, removeDevice } from '../src/config.js';
 import { initVault, registerMachine } from '../src/vault.js';
 import { pushAll, pullAll, adoptFromVault, discoverProjects, status as syncStatus } from '../src/sync.js';
 import { gatherStatus } from '../src/status.js';
@@ -248,6 +248,26 @@ function roleCmd() {
   }
 }
 
+function deviceCmd() {
+  const sub = args[0] || 'list';
+  const cfg = loadConfig();
+  if (sub === 'list') {
+    if (!cfg.devices.length) { console.log(warn('no paired computers')); return; }
+    for (const d of cfg.devices) console.log(`  ${d.name.padEnd(24).slice(0, 24)} ${c.dim(d.syncthingId)}`);
+    return;
+  }
+  if (sub === 'remove') {
+    const key = args.slice(1).join(' ');
+    if (!key) { console.log(bad('usage: claude-sync device remove <name-or-syncthing-id>')); return; }
+    const removed = removeDevice(key);
+    if (!removed) { console.log(bad(`no paired computer matches "${key}" (try \`claude-sync device list\`)`)); return; }
+    console.log(ok(`removed "${removed.name}" — syncing with it stops; already-synced conversations are kept`));
+    console.log(c.dim('note: the managed Syncthing unpairs it on its next start (or immediately if running via the GUI)'));
+    return;
+  }
+  console.log(bad('usage: claude-sync device [list] | device remove <name-or-id>'));
+}
+
 function filesCmd() {
   const sub = args[0] || 'status';
   const cfg = loadConfig();
@@ -365,6 +385,7 @@ function help() {
   sync [--mode push|push-cloud|full]  run the configured syncMode pipeline (cloud pull -> pull -> push -> cloud push)
   schedule install|status|remove   daily push-only background job (settings.scheduleAt)
   files status|push|pull       sync project FILES via git (remote ff, or vault bundles)
+  device [list|remove <name>]   paired computers: list, or unpair one (already-synced data is kept)
   project [list|on|off <name>]  per-project sync switch (off = excluded from push/pull/status)
   role [primary|secondary|clear]  make this machine the source of truth on conflicts (or defer)
   cloud info|set|push|pull|sync   mirror the vault to your own S3 bucket (store-and-forward; optional encryption)
@@ -375,7 +396,7 @@ function help() {
 GUI: \`npm run app\`.  Architecture: DESIGN.md.`);
 }
 
-const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, sync: syncCmd, schedule: scheduleCmd, files: filesCmd, project: projectCmd, role: roleCmd, cloud: cloudCmd, config: configCmd, tidy, relay: relayCmd, help, '--help': help, '-h': help };
+const table = { doctor, init, link, 'link-all': linkAll, adopt, status: statusCmd, push, pull, sync: syncCmd, schedule: scheduleCmd, files: filesCmd, project: projectCmd, device: deviceCmd, role: roleCmd, cloud: cloudCmd, config: configCmd, tidy, relay: relayCmd, help, '--help': help, '-h': help };
 
 (async () => {
   const fn = table[cmd] || (cmd ? () => { console.log(bad(`unknown command: ${cmd}`)); help(); } : help);

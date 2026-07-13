@@ -5,7 +5,7 @@ import { app, BrowserWindow, ipcMain, Tray, Menu, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gatherStatus } from '../src/status.js';
-import { loadConfig, saveConfig, setSetting, addProject, linkProjects, setProjectSync } from '../src/config.js';
+import { loadConfig, saveConfig, setSetting, addProject, linkProjects, setProjectSync, removeDevice } from '../src/config.js';
 import { initVault } from '../src/vault.js';
 import { pushAll, pullAll, syncAll, discoverProjects, adoptFromVault, status as syncStatus } from '../src/sync.js';
 import { runSync } from '../src/run.js';
@@ -76,6 +76,15 @@ ipcMain.handle('engine:pull', (_e, opts) => pullAll(undefined, undefined, opts |
 ipcMain.handle('engine:syncAll', (_e, opts) => syncAll(undefined, undefined, opts || {}));
 ipcMain.handle('engine:runSync', (_e, opts) => runSync(opts || {}));
 ipcMain.handle('engine:setProjectSync', (_e, key, enabled) => setProjectSync(key, enabled));
+ipcMain.handle('engine:removeDevice', async (_e, key) => {
+  const removed = removeDevice(key);
+  if (!removed) return { ok: false, error: 'device not found' };
+  // Best-effort: also unpair in the managed Syncthing (may not be running/installed).
+  let syncthingCleaned = false;
+  try { const st = await syncthing(); await st.removeDevice(removed.syncthingId); syncthingCleaned = true; }
+  catch { /* config removal is the source of truth; Syncthing cleanup can rerun */ }
+  return { ok: true, removed, syncthingCleaned };
+});
 ipcMain.handle('engine:discover', () => discoverProjects());
 ipcMain.handle('engine:adopt', () => adoptFromVault());
 ipcMain.handle('engine:linkAll', (_e, list) => linkProjects(list));
