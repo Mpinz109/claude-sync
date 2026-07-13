@@ -68,3 +68,28 @@ claude-sync cloud push      # mirror the vault up
 ```
 
 `claude-sync cloud sync` does the pull+push mirror halves in one command.
+
+## Key rotation and revocation
+
+Three separate keys, three procedures:
+
+**Vault passphrase** (fully in-app): GUI Settings → Security → type the new
+passphrase → Rotate, or `claude-sync cloud rekey "<new passphrase>"`. The whole
+bucket is decrypted with the old key and re-encrypted under a fresh salt; a wrong
+old passphrase fails before anything is rewritten. Then set the same passphrase on
+every other machine (`claude-sync config vaultPassphrase "..."`). Use `--disable`
+(CLI) or a blank passphrase (GUI) to remove encryption.
+
+**AWS access key** (console + app): the app's key is deliberately scoped so it
+cannot manage IAM, so revocation happens in the AWS Console:
+1. IAM → user `claude-sync-vault` → Security credentials → create a SECOND key.
+2. Paste it into `~/.aws/credentials` (replacing the old values).
+3. Verify: GUI Settings → Security → "Verify key", or `claude-sync cloud creds`.
+4. Back in the console: deactivate, then delete the old key.
+Zero downtime, and a leaked old key dies at step 4.
+
+**Syncthing device identity** (per machine): GUI Devices → "Reset identity…", or
+`claude-sync device reset-identity --yes` (close the app first for the CLI path).
+The machine gets a brand-new Device ID; the old identity is dead immediately and
+every other computer must re-pair with the new code. Conversations and the vault
+are untouched.

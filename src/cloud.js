@@ -107,3 +107,29 @@ export async function cloudSync(opts) {
   const push = await cloudPush(opts);
   return { pull, push };
 }
+
+/**
+ * Rotate the vault passphrase: decrypt every object with the old key and
+ * re-encrypt with a new one under a FRESH salt. Also covers enabling
+ * encryption (old '' -> new set) and disabling it (new ''). Everything is
+ * downloaded and decrypted FIRST, so a wrong old passphrase fails before a
+ * single object is rewritten.
+ */
+export async function rekeyCloud({ s3, prefix = 'vault/', oldPassphrase = '', newPassphrase = '' }) {
+  const oldKey = await getKey(s3, prefix, oldPassphrase);
+  const remoteM = await remoteManifest(s3, prefix, oldKey); // throws on wrong old passphrase
+  const files = [];
+  for (const rel of Object.keys(remoteM)) {
+    const raw = await s3.getObject(prefix + rel);
+    if (raw) files.push([rel, open(raw, oldKey)]); // decrypt-all before write-any
+  }
+  let newKey = null;
+  if (newPassphrase) {
+    const salt = crypto.randomBytes(16);
+    await s3.putObject(prefix + SALT_KEY, salt);
+    newKey = crypto.scryptSync(newPassphrase, salt, 32);
+  }
+  for (const [rel, plain] of files) await s3.putObject(prefix + rel, seal(plain, newKey));
+  await s3.putObject(prefix + MANIFEST_KEY, seal(Buffer.from(JSON.stringify(remoteM)), newKey));
+  return { rekeyed: files.length, encrypted: !!newKey };
+}

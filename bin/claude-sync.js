@@ -11,7 +11,8 @@ import { gatherStatus } from '../src/status.js';
 import { tidyRegistration, dedupeVault } from '../src/maintain.js';
 import { Relay, DEFAULT_PORT } from '../src/relay.js';
 import { S3, loadAwsCreds } from '../src/s3.js';
-import { cloudPush, cloudPull, cloudSync } from '../src/cloud.js';
+import { Syncthing } from '../src/syncthing.js';
+import { cloudPush, cloudPull, cloudSync, rekeyCloud } from '../src/cloud.js';
 import { runSync, summarizeRun, SYNC_MODES } from '../src/run.js';
 import * as schedule from '../src/schedule.js';
 import * as gitsync from '../src/gitsync.js';
@@ -265,7 +266,25 @@ function deviceCmd() {
     console.log(c.dim('note: the managed Syncthing unpairs it on its next start (or immediately if running via the GUI)'));
     return;
   }
-  console.log(bad('usage: claude-sync device [list] | device remove <name-or-id>'));
+  if (sub === 'reset-identity') {
+    if (!args.includes('--yes')) {
+      console.log(warn('this BURNS this machine\'s Syncthing identity: a new Device ID is generated and'));
+      console.log(warn('every other computer must re-pair with the new code. Close the Claude Sync app first.'));
+      console.log(c.dim('re-run with:  claude-sync device reset-identity --yes'));
+      return;
+    }
+    const st = new Syncthing();
+    try {
+      st.resetIdentity();
+      console.log(ok('identity wiped. The next start of the app (or `pair`) generates a fresh Device ID.'));
+      console.log(c.dim('paired computers list kept — re-share the vault after re-pairing on both sides.'));
+    } catch (e) {
+      console.log(bad(`could not wipe the Syncthing home: ${e.message.split('\n')[0]}`));
+      console.log(c.dim('is the Claude Sync app still running? Close it and retry.'));
+    }
+    return;
+  }
+  console.log(bad('usage: claude-sync device [list] | device remove <name-or-id> | device reset-identity --yes'));
 }
 
 function filesCmd() {
@@ -357,7 +376,37 @@ async function cloudCmd() {
     console.log(st.vaultPassphrase ? ok('client-side encryption ON') : c.dim('client-side encryption off (set vaultPassphrase to enable)'));
     return;
   }
-  if (!['push', 'pull', 'sync'].includes(sub)) { console.log(bad('usage: claude-sync cloud info|set|push|pull|sync')); return; }
+  if (sub === 'creds') {
+    const creds = loadAwsCreds(st.awsProfile);
+    if (!creds) { console.log(bad('no AWS credentials found (env or ~/.aws/credentials) — see docs/aws-setup.md')); return; }
+    const masked = `${creds.accessKeyId.slice(0, 4)}…${creds.accessKeyId.slice(-4)}`;
+    console.log(ok(`credentials loaded: ${masked} ${c.dim(`(profile "${st.awsProfile}" or env)`)}`));
+    if (!st.s3Bucket) { console.log(c.dim('no bucket set — cannot verify against S3')); return; }
+    try {
+      const s3v = new S3({ bucket: st.s3Bucket, region: st.s3Region, creds });
+      await s3v.listAll(`${st.s3Prefix}_claude-sync/`);
+      console.log(ok(`key WORKS against s3://${st.s3Bucket}`));
+      console.log(c.dim('rotating? create the new key in the AWS console, paste it into ~/.aws/credentials,\nre-run `cloud creds`, then deactivate the old key in the console.'));
+    } catch (e) { console.log(bad(`key FAILED against the bucket: ${e.message.split('\n')[0]}`)); }
+    return;
+  }
+  if (sub === 'rekey') {
+    if (!st.s3Bucket) { console.log(bad('no bucket — run `claude-sync cloud set <bucket>` first')); return; }
+    const creds = loadAwsCreds(st.awsProfile);
+    if (!creds) { console.log(bad('no AWS credentials — see docs/aws-setup.md')); return; }
+    const disable = args.includes('--disable');
+    const newPass = disable ? '' : args.slice(1).filter((a) => !a.startsWith('--')).join(' ');
+    if (!disable && !newPass) { console.log(bad('usage: claude-sync cloud rekey <new passphrase>   (or --disable to remove encryption)')); return; }
+    const s3r = new S3({ bucket: st.s3Bucket, region: st.s3Region, creds });
+    try {
+      const r = await rekeyCloud({ s3: s3r, prefix: st.s3Prefix, oldPassphrase: st.vaultPassphrase || '', newPassphrase: newPass });
+      setSetting('vaultPassphrase', newPass);
+      console.log(ok(`re-encrypted ${r.rekeyed} object(s); encryption is now ${r.encrypted ? 'ON with the new passphrase' : 'OFF'}`));
+      console.log(warn('set the SAME passphrase on every other machine (`claude-sync config vaultPassphrase "..."`) or their cloud pulls will fail'));
+    } catch (e) { console.log(bad(`rekey failed (nothing was rewritten): ${e.message.split('\n')[0]}`)); }
+    return;
+  }
+  if (!['push', 'pull', 'sync'].includes(sub)) { console.log(bad('usage: claude-sync cloud info|set|creds|rekey|push|pull|sync')); return; }
   if (!cfg.vaultDir) { console.log(bad('no local vault — run init first')); return; }
   if (!st.s3Bucket) { console.log(bad('no bucket — run `claude-sync cloud set <bucket> [region]` first')); return; }
   const creds = loadAwsCreds(st.awsProfile);
@@ -385,10 +434,10 @@ function help() {
   sync [--mode push|push-cloud|full]  run the configured syncMode pipeline (cloud pull -> pull -> push -> cloud push)
   schedule install|status|remove   daily push-only background job (settings.scheduleAt)
   files status|push|pull       sync project FILES via git (remote ff, or vault bundles)
-  device [list|remove <name>]   paired computers: list, or unpair one (already-synced data is kept)
+  device [list|remove <name>|reset-identity]   paired computers; reset-identity burns this machine's Device ID
   project [list|on|off <name>]  per-project sync switch (off = excluded from push/pull/status)
   role [primary|secondary|clear]  make this machine the source of truth on conflicts (or defer)
-  cloud info|set|push|pull|sync   mirror the vault to your own S3 bucket (store-and-forward; optional encryption)
+  cloud info|set|creds|rekey|push|pull|sync   mirror the vault to your own S3 bucket (store-and-forward; optional encryption)
   config [key] [value]         list / read / set settings (e.g. vaultPassphrase, scheduleAt)
   tidy [--yes]                 fix duplicate projects: merge dup vault records, clean dead/variant registrations
   relay [--port N] [--token T] run the agent message relay (Claude sessions connect via bin/claude-sync-mcp.js)

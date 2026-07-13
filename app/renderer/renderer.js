@@ -19,6 +19,9 @@ if (!window.api) {
     runSync: async () => ({ mode: 'push', steps: [{ step: 'push', results: [] }] }),
     setProjectSync: async () => ({ ok: true }),
     removeDevice: async () => ({ ok: true, removed: {}, syncthingCleaned: true }),
+    rekeyVault: async () => ({ ok: true, rekeyed: 0, encrypted: true }),
+    credsCheck: async () => ({ ok: true, present: false }),
+    resetIdentity: async () => ({ ok: true, deviceId: 'PREVIEW-NEW-ID' }),
     discover: async () => ([{ name: 'Example Project', localPath: 'C:\\…\\Example Project' }]),
     linkAll: async () => ({ added: 0, total: 0 }),
     openExternal: async () => {}, onAction: () => {},
@@ -223,6 +226,44 @@ function bindSetting(id, key, kind = 'check') {
   $('#copyId').addEventListener('click', () => {
     navigator.clipboard?.writeText($('#thisDevice').textContent);
   });
+
+  $('#resetIdentityBtn')?.addEventListener('click', async () => {
+    if (!confirm('Reset this computer\'s identity?\n\nA brand-new Device ID is generated and the old one stops working immediately. Every other computer must re-pair using the new code.\n\nYour conversations and vault are NOT affected.')) return;
+    $('#resetIdentityBtn').disabled = true;
+    $('#thisDevice').textContent = 'generating new identity…';
+    const r = await window.api.resetIdentity();
+    flash(r.ok ? 'New Device ID generated — re-pair your other computers' : `Reset failed: ${r.error}`);
+    $('#resetIdentityBtn').disabled = false;
+    await renderDevices();
+  });
+
+  $('#rekeyBtn')?.addEventListener('click', async () => {
+    const next = $('#newPassphrase').value;
+    const msg = next
+      ? 'Re-encrypt the entire cloud vault with the new passphrase?\n\nThe old passphrase stops working immediately. You must set the same new passphrase on every other machine.'
+      : 'Remove encryption from the cloud vault?\n\nThe bucket will hold your conversations unencrypted (still private to your AWS account).';
+    if (!confirm(msg)) return;
+    $('#rekeyBtn').disabled = true; $('#rekeyBtn').textContent = 'Rotating…';
+    const r = await window.api.rekeyVault(next);
+    flash(r.ok ? `Re-encrypted ${r.rekeyed} object(s); encryption ${r.encrypted ? 'ON' : 'OFF'}` : `Rotate failed (nothing rewritten): ${r.error}`);
+    if (r.ok) $('#newPassphrase').value = '';
+    $('#rekeyBtn').disabled = false; $('#rekeyBtn').textContent = 'Rotate';
+  });
+
+  async function refreshCreds(verify) {
+    const r = await window.api.credsCheck(verify);
+    const el = $('#credsStatus');
+    if (!r.present) { el.textContent = 'AWS key: none found (see docs/aws-setup.md)'; return; }
+    let s = `AWS key: ${r.masked}`;
+    if (r.verified === true) s += ' — works against the bucket ✓';
+    else if (r.verified === false) s += ` — FAILED: ${r.error}`;
+    el.textContent = s;
+  }
+  $('#credsVerifyBtn')?.addEventListener('click', async () => {
+    $('#credsStatus').textContent = 'AWS key: verifying…';
+    await refreshCreds(true);
+  });
+  refreshCreds(false);
 
   $('#pairBtn')?.addEventListener('click', async () => {
     const id = $('#pairId').value.trim();

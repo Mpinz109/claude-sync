@@ -9,6 +9,8 @@ import { loadConfig, saveConfig, setSetting, addProject, linkProjects, setProjec
 import { initVault } from '../src/vault.js';
 import { pushAll, pullAll, syncAll, discoverProjects, adoptFromVault, status as syncStatus } from '../src/sync.js';
 import { runSync } from '../src/run.js';
+import { S3, loadAwsCreds } from '../src/s3.js';
+import { rekeyCloud } from '../src/cloud.js';
 import { Syncthing } from '../src/syncthing.js';
 
 // Lazy singleton: start the managed Syncthing on first need, reuse after.
@@ -76,6 +78,46 @@ ipcMain.handle('engine:pull', (_e, opts) => pullAll(undefined, undefined, opts |
 ipcMain.handle('engine:syncAll', (_e, opts) => syncAll(undefined, undefined, opts || {}));
 ipcMain.handle('engine:runSync', (_e, opts) => runSync(opts || {}));
 ipcMain.handle('engine:setProjectSync', (_e, key, enabled) => setProjectSync(key, enabled));
+ipcMain.handle('engine:rekeyVault', async (_e, newPassphrase) => {
+  const cfg = loadConfig();
+  const st = cfg.settings;
+  if (!st.s3Bucket) return { ok: false, error: 'no cloud bucket configured' };
+  const creds = loadAwsCreds(st.awsProfile);
+  if (!creds) return { ok: false, error: 'no AWS credentials (see docs/aws-setup.md)' };
+  try {
+    const s3 = new S3({ bucket: st.s3Bucket, region: st.s3Region, creds });
+    const r = await rekeyCloud({ s3, prefix: st.s3Prefix, oldPassphrase: st.vaultPassphrase || '', newPassphrase: newPassphrase || '' });
+    setSetting('vaultPassphrase', newPassphrase || '');
+    return { ok: true, ...r };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
+ipcMain.handle('engine:credsCheck', async (_e, verify) => {
+  const st = loadConfig().settings;
+  const creds = loadAwsCreds(st.awsProfile);
+  if (!creds) return { ok: false, present: false, error: 'no AWS credentials found' };
+  const masked = `${creds.accessKeyId.slice(0, 4)}…${creds.accessKeyId.slice(-4)}`;
+  if (!verify || !st.s3Bucket) return { ok: true, present: true, masked, verified: null };
+  try {
+    const s3 = new S3({ bucket: st.s3Bucket, region: st.s3Region, creds });
+    await s3.listAll(`${st.s3Prefix}_claude-sync/`);
+    return { ok: true, present: true, masked, verified: true };
+  } catch (e) { return { ok: true, present: true, masked, verified: false, error: String(e.message || e).split('\n')[0] }; }
+});
+ipcMain.handle('engine:resetIdentity', async () => {
+  try {
+    if (!_st) _st = new (await import('../src/syncthing.js')).Syncthing();
+    _st.resetIdentity();
+    _stStart = null;
+    const st = await syncthing(); // regenerates + starts fresh
+    const deviceId = await st.getDeviceId();
+    // Re-share the vault with the (kept) paired list so re-pairing is one-sided.
+    const cfg = loadConfig();
+    if (cfg.vaultDir && cfg.devices.length) {
+      try { await st.shareVault('claude-sync-vault', 'Claude Sync Vault', cfg.vaultDir, cfg.devices.map((d) => d.syncthingId)); } catch { /* best-effort */ }
+    }
+    return { ok: true, deviceId };
+  } catch (e) { return { ok: false, error: String(e.message || e) }; }
+});
 ipcMain.handle('engine:removeDevice', async (_e, key) => {
   const removed = removeDevice(key);
   if (!removed) return { ok: false, error: 'device not found' };
