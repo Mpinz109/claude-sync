@@ -26,7 +26,7 @@ export function normalizePath(p) {
 export const DEFAULT_SETTINGS = {
   autoMerge: false,             // auto-resolve UNRELATED conflicts by newest, loser kept as .fork
   autoMergeIfNoConflicts: true, // legacy boolean; superseded by incomingPolicy (kept for back-compat)
-  incomingPolicy: 'merge',      // 'ff-only' (apply only if unchanged here) | 'merge' (lossless union) | 'manual' (report only)
+  incomingPolicy: 'ff-only',    // 'ff-only' (apply only if unchanged here — safest, default) | 'merge' (lossless union) | 'manual' (report only)
   promptOnOpen: true,           // run the pull prompt when Claude opens
   scheduleAt: '03:00',          // daily background job time
   schedulePushOnly: true,       // legacy toggle; superseded by syncMode (kept for back-compat)

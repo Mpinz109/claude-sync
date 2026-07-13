@@ -2,7 +2,7 @@
 
 // Fallback so the shell renders in a plain browser / preview (no Electron engine).
 if (!window.api) {
-  const demoSettings = { scheduleAt: '03:00', schedulePushOnly: true, autoMergeIfNoConflicts: true, incomingPolicy: 'merge', syncMode: 'push', promptOnOpen: true, autoMerge: false, awsDiscovery: '' };
+  const demoSettings = { scheduleAt: '03:00', schedulePushOnly: true, autoMergeIfNoConflicts: true, incomingPolicy: 'ff-only', syncMode: 'push', promptOnOpen: true, autoMerge: false, awsDiscovery: '' };
   window.api = {
     status: async () => ({
       machineName: 'this-computer', platform: '(preview)', vaultDir: null, claudeRunning: false,
@@ -156,7 +156,7 @@ async function renderSettings() {
   const mode = st.syncMode || 'push';
   $('#syncMode').value = mode;
   $('#syncModeHint').textContent = MODE_HINTS[mode] || '';
-  const policy = st.incomingPolicy || (st.autoMergeIfNoConflicts === false ? 'manual' : 'merge');
+  const policy = st.incomingPolicy || (st.autoMergeIfNoConflicts === false ? 'manual' : 'ff-only');
   $('#incomingPolicy').value = policy;
   $('#incomingPolicyHint').textContent = POLICY_HINTS[policy] || '';
   $('#promptOnOpen').checked = st.promptOnOpen;

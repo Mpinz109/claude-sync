@@ -111,9 +111,9 @@ test('local ahead of vault: pull writes nothing; push UPDATES the vault copy', (
   assert.deepEqual(pr2.updated, [], 'push is idempotent after the update');
 });
 
-test('true divergence, defaults: pull merges losslessly with an undo snapshot', () => {
+test('true divergence, merge policy: pull merges losslessly with an undo snapshot', () => {
   const s = setup({ localKind: 'diverged' });
-  const r = pullProject(cfgB(s.vault, s.projB), s.projB, s.B.paths, { dryRun: false });
+  const r = pullProject(cfgB(s.vault, s.projB, { incomingPolicy: 'merge' }), s.projB, s.B.paths, { dryRun: false });
   assert.deepEqual(r.merged, [S]);
   assert.deepEqual(r.conflicts, []);
   assert.deepEqual(r.forks, []);
@@ -129,9 +129,17 @@ test('divergence with autoMergeIfNoConflicts off: reported as available, nothing
   assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bText, 'local untouched');
 });
 
-test('dry-run divergence: merge reported, nothing written', () => {
+test('default policy is ff-only: divergence defers, local untouched', () => {
   const s = setup({ localKind: 'diverged' });
-  const r = pullProject(cfgB(s.vault, s.projB), s.projB, s.B.paths, { dryRun: true });
+  const r = pullProject(cfgB(s.vault, s.projB), s.projB, s.B.paths, { dryRun: false }); // empty settings = default
+  assert.ok(r.available.includes(S), 'deferred under the safe default');
+  assert.deepEqual(r.merged, []);
+  assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bText);
+});
+
+test('dry-run divergence (merge policy): merge reported, nothing written', () => {
+  const s = setup({ localKind: 'diverged' });
+  const r = pullProject(cfgB(s.vault, s.projB, { incomingPolicy: 'merge' }), s.projB, s.B.paths, { dryRun: true });
   assert.deepEqual(r.merged, [S]);
   assert.equal(readText(tFile(s.B, s.projB.localPath, S)), s.bText);
   assert.equal(undoFiles(s.B, s.projB.localPath).length, 0);

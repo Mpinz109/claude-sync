@@ -105,10 +105,11 @@ export function pullProject(cfg, project, paths, { dryRun = false } = {}) {
   const home = paths.home;
   const settings = cfg.settings || {};
   const autoMerge = settings.autoMerge === true;
-  // Incoming-changes policy: 'merge' (lossless union, default), 'ff-only'
-  // (apply only when THIS machine hasn't changed the session — fast-forward),
-  // 'manual' (report only). Legacy autoMergeIfNoConflicts=false maps to manual.
-  const policy = settings.incomingPolicy || (settings.autoMergeIfNoConflicts === false ? 'manual' : 'merge');
+  // Incoming-changes policy: 'ff-only' (default — apply only when THIS machine
+  // hasn't changed the session, i.e. pure fast-forward), 'merge' (lossless
+  // union), 'manual' (report only). Legacy autoMergeIfNoConflicts=false maps
+  // to manual.
+  const policy = settings.incomingPolicy || (settings.autoMergeIfNoConflicts === false ? 'manual' : 'ff-only');
   const applyClean = policy !== 'manual';
 
   let primaryId = null;
