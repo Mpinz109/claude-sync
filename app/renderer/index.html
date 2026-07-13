@@ -34,8 +34,9 @@
           <div id="thisDevice" class="mono big">…</div>
           <div class="row">
             <button id="copyId" class="secondary">Copy code</button>
-            <span class="muted small">QR code + scanning come with Syncthing (phase 4)</span>
+            <button id="resetIdentityBtn" class="secondary">Reset identity…</button>
           </div>
+          <span class="muted small">Reset generates a brand-new Device ID (use if this machine's key may be compromised). Every other computer must re-pair with the new code.</span>
         </div>
         <div class="card">
           <div class="label">Pair a new computer</div>
@@ -108,6 +109,19 @@
             <div class="info">Auto-resolve conflicts by newest<div class="path">The other copy is always kept as a backup, never deleted.</div></div>
             <label class="switch"><input type="checkbox" id="autoMerge" /><span class="slider"></span></label>
           </div>
+        </div>
+        <div class="card">
+          <div class="label">Security</div>
+          <div class="row">
+            <input id="newPassphrase" type="password" placeholder="New vault passphrase (leave blank to remove encryption)" />
+            <button id="rekeyBtn" class="secondary">Rotate</button>
+          </div>
+          <span class="muted small">Re-encrypts the entire cloud vault under the new passphrase (the old one stops working immediately). Set the same passphrase on every other machine afterward.</span>
+          <div class="row" style="margin-top:8px">
+            <span id="credsStatus" class="muted small" style="flex:1">AWS key: checking…</span>
+            <button id="credsVerifyBtn" class="secondary">Verify key</button>
+          </div>
+          <span class="muted small">To rotate the AWS key: create a second key in the AWS console, paste it into <code>~/.aws/credentials</code>, click Verify, then deactivate the old key in the console. (The app's own key deliberately cannot manage IAM.)</span>
         </div>
         <div class="card">
           <div class="label">Self-hosted relay (optional)</div>

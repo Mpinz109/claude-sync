@@ -163,3 +163,15 @@ test('removeDeviceFrom: matches by id or name (case-insensitive), null when abse
   assert.equal(removeDeviceFrom(cfg, 'ghost'), null);
   assert.deepEqual(cfg.devices, []);
 });
+
+// ---------- identity reset ----------
+test('syncthing resetIdentity wipes the managed home', async () => {
+  const { Syncthing } = await import('../src/syncthing.js');
+  const home = mk('cs-st-home-');
+  fs.writeFileSync(path.join(home, 'cert.pem'), 'x');
+  fs.writeFileSync(path.join(home, 'key.pem'), 'x');
+  fs.writeFileSync(path.join(home, 'config.xml'), '<x/>');
+  const st = new Syncthing({ home, binPath: 'unused' });
+  st.resetIdentity();
+  assert.equal(fs.existsSync(home), false, 'identity + config wiped; next start regenerates');
+});

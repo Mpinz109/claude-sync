@@ -127,3 +127,59 @@ test('listAll paginates and decodes XML entities', async () => {
   const keys = await s3.listAll('vault/');
   assert.deepEqual(keys, ['vault/a.json', 'vault/b&c.json', 'vault/d.json']);
 });
+
+// ---------- passphrase rotation ----------
+import { rekeyCloud } from '../src/cloud.js';
+
+test('rekey: rotate passphrase re-encrypts; old fails, new works', async () => {
+  const s3 = new FakeS3();
+  const secret = '{"private":"stuff"}';
+  const a = mkVault({ 'projects/p/sessions/s/transcript.jsonl': secret });
+  await cloudPush({ vaultDir: a, s3, passphrase: 'old pass' });
+  const r = await rekeyCloud({ s3, oldPassphrase: 'old pass', newPassphrase: 'new pass' });
+  assert.equal(r.rekeyed, 1);
+  assert.equal(r.encrypted, true);
+  for (const [key, buf] of s3.objects) {
+    if (key.endsWith('/salt')) continue;
+    assert.ok(!buf.toString('utf8').includes('private'), `plaintext leaked in ${key}`);
+  }
+  const b = mkVault({});
+  await assert.rejects(() => cloudPull({ vaultDir: b, s3, passphrase: 'old pass' }), /passphrase/);
+  const r2 = await cloudPull({ vaultDir: mkVault({}), s3, passphrase: 'new pass' });
+  assert.equal(r2.downloaded.length, 1);
+});
+
+test('rekey: enable encryption on a previously plaintext vault', async () => {
+  const s3 = new FakeS3();
+  const a = mkVault({ 'x.json': 'clear text here' });
+  await cloudPush({ vaultDir: a, s3 }); // no passphrase
+  await rekeyCloud({ s3, oldPassphrase: '', newPassphrase: 'first pass' });
+  for (const [key, buf] of s3.objects) {
+    if (key.endsWith('/salt')) continue;
+    assert.ok(!buf.toString('utf8').includes('clear text'), `plaintext left in ${key}`);
+  }
+  const b = mkVault({});
+  await cloudPull({ vaultDir: b, s3, passphrase: 'first pass' });
+  assert.equal(fs.readFileSync(path.join(b, 'x.json'), 'utf8'), 'clear text here');
+});
+
+test('rekey: disable encryption decrypts the bucket', async () => {
+  const s3 = new FakeS3();
+  const a = mkVault({ 'x.json': 'now public-ish' });
+  await cloudPush({ vaultDir: a, s3, passphrase: 'p1' });
+  const r = await rekeyCloud({ s3, oldPassphrase: 'p1', newPassphrase: '' });
+  assert.equal(r.encrypted, false);
+  const b = mkVault({});
+  const r2 = await cloudPull({ vaultDir: b, s3 }); // no passphrase needed anymore
+  assert.equal(r2.downloaded.length, 1);
+});
+
+test('rekey: wrong old passphrase fails BEFORE any object is rewritten', async () => {
+  const s3 = new FakeS3();
+  const a = mkVault({ 'x.json': 'content' });
+  await cloudPush({ vaultDir: a, s3, passphrase: 'right' });
+  const before = new Map([...s3.objects].map(([k, v]) => [k, Buffer.from(v)]));
+  await assert.rejects(() => rekeyCloud({ s3, oldPassphrase: 'wrong', newPassphrase: 'x' }), /passphrase/);
+  assert.equal(s3.objects.size, before.size);
+  for (const [k, v] of before) assert.deepEqual(s3.objects.get(k), v, `${k} was modified`);
+});

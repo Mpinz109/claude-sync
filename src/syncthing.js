@@ -151,4 +151,16 @@ export class Syncthing {
   }
 
   stop() { if (this.proc) { try { this.proc.kill(); } catch { /* */ } this.proc = null; } }
+
+  /**
+   * Burn this machine's Syncthing identity: wipe the managed home (device
+   * cert/key, config, index). The next start() generates a brand-new Device
+   * ID — every other computer must re-pair with the new code. For "this
+   * machine's key may be compromised" scenarios.
+   */
+  resetIdentity() {
+    this.stop();
+    fs.rmSync(this.home, { recursive: true, force: true });
+    this.apiKey = null;
+  }
 }
