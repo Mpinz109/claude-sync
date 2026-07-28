@@ -1,68 +1,87 @@
-# Setting up a second computer
+# Setting up a new computer
 
-This walks through bringing a **second computer** into sync: pulling the sessions a
-first machine published into the vault, so its conversations show up here
-(transcripts + Recents tiles). It's written so you can hand it to Claude Code on the
-second machine and have it run the steps.
+Bring a brand-new machine into sync: it receives every project's conversations
+(transcripts + Recents tiles) and starts participating in daily sync. Written so
+you can hand it to Claude Code on the new machine and have it run the steps.
 
-Read `DESIGN.md` and `README.md` for the full picture. Until Syncthing transport
-lands, the **vault** folder is moved between machines by hand (USB or any cloud
-folder); after that it mirrors automatically.
+Two transports for the first sync — pick one:
+- **Cloud (recommended):** the vault lives in your S3 bucket; the new machine
+  pulls it. Needs the one-time AWS setup in [docs/aws-setup.md](docs/aws-setup.md).
+- **USB/folder copy:** carry the vault folder over by hand. No AWS needed.
 
-## What you need on this computer
+## 0. Prerequisites on the new machine
 
-1. The **`claude-sync`** tool (this repo). Pure Node — no install needed to run the CLI.
-2. The **vault** folder that the first machine filled with `claude-sync push`
-   (holds its sessions, path-tokenized). Copy it over, or share it via cloud/USB.
+1. **Claude** installed and signed in (same account).
+2. **Node 18+** (`node --version`). Windows, no admin needed:
+   `winget install --id OpenJS.NodeJS.LTS --scope user --accept-package-agreements --accept-source-agreements --silent` (then open a fresh shell).
+3. **git** (usually present; `winget install Git.Git` if not).
+4. The tool: `git clone https://github.com/Mpinz109/claude-sync` and `cd claude-sync`.
+   The CLI is zero-dependency — no npm install needed unless you want the GUI
+   (`npm install && npm run app`).
 
-## Facts the tool already handles (don't fight them)
+## 1. Project FILES come first
 
-- On Windows, Claude is a **Store (MSIX) app**; its data lives under
-  `%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`, not `%APPDATA%\Claude`.
-  `claude-sync doctor` detects this automatically.
-- Session JSON must be **UTF-8 with no BOM** or Claude silently skips it. The tool
-  only writes BOM-free.
-- Writing Claude state needs Claude **fully closed** (it rewrites its own state on
-  launch/quit); `pull` refuses to run while Claude is open.
-- Transcript folders are named by an encoding of the absolute path; the tool
-  re-encodes per machine.
+Conversations attach to project folders, so the folders must exist before adopt.
+Either `git clone` each project that has a remote, or copy the projects root
+(e.g. `Random Claude Projects`) over USB/network — skip `node_modules`/`.venv`,
+they rebuild. Note the absolute path of the projects root here.
 
-## Steps
+## 2. Point at the vault
 
 ```bash
-# 1. Node 18+ (install user-scope if missing, then use a fresh shell)
-node --version
-#   Windows: winget install --id OpenJS.NodeJS.LTS --scope user --accept-package-agreements --accept-source-agreements --silent
+node bin/claude-sync.js init --vault "<local vault folder, e.g. %USERPROFILE%\Desktop\claude-vault>"
+```
 
-# 2. Confirm the tool sees this machine's Claude
-cd <path-to>/claude-sync
-node bin/claude-sync.js doctor
+**Cloud transport:** put the AWS key in `~/.aws/credentials` (see
+docs/aws-setup.md — each machine can have its own key), then:
+```bash
+node bin/claude-sync.js cloud set <bucket> <region>
+node bin/claude-sync.js config vaultPassphrase "<same passphrase as the other machines, if set>"
+node bin/claude-sync.js cloud pull
+```
 
-# 3. Point at the vault that came from the first machine
-node bin/claude-sync.js init --vault "<path-to>/vault"
+**USB transport:** copy the `claude-vault` folder from the other machine into
+the path you gave `init`.
 
-# 4. Adopt the vault's projects (links them to local folders by name,
-#    reusing the vault's project ids so pull lines up)
-node bin/claude-sync.js adopt
+## 3. Adopt, preview, pull
 
-# 5. Preview, then pull — with Claude fully closed
-node bin/claude-sync.js status
+```bash
+node bin/claude-sync.js doctor                       # sanity: paths + counts detected
+node bin/claude-sync.js adopt --root "<projects root from step 1>"
+node bin/claude-sync.js status                       # preview what will arrive
+# fully close Claude (all windows + tray + no Claude.exe in Task Manager)
 node bin/claude-sync.js pull --yes
 ```
 
-Reopen Claude. The first machine's conversations should appear as Recents tiles and
-be resumable, with paths remapped to this machine.
+Reopen Claude: every project's conversations should appear as Recents tiles,
+paths remapped to this machine (different username/folder layout is fine —
+that's handled).
 
-### Notes
+## 4. Make it permanent
 
-- `adopt` reports "no local folder found for: X" when a project's **files** aren't on
-  this machine yet. Conversation pull needs the folder to exist — copy that project
-  folder over first (file sync via git is on the roadmap), then re-run `adopt`.
-- To publish this machine's own sessions back: `node bin/claude-sync.js push`, then
-  move the vault back (or let Syncthing handle it once that lands).
+```bash
+node bin/claude-sync.js config syncMode full         # or pull / push-cloud / push
+node bin/claude-sync.js schedule install             # daily background sync (default 03:00)
+```
+
+`full` is right for a machine you work on (publish + receive; the merge step
+auto-skips while Claude is open). `pull` for a mirror-only machine. The GUI
+(`npm run app`) manages all of this too: Settings for modes, Projects for
+per-project switches, Devices for pairing.
+
+## Facts the tool already handles (don't fight them)
+
+- Windows Store Claude keeps its data in the MSIX sandbox
+  (`%LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude`); regular
+  installs use `%APPDATA%\Claude`. `doctor` detects both.
+- Session JSON must be UTF-8 with **no BOM**; the tool only writes BOM-free.
+- Writing Claude state needs Claude fully closed; `pull` guards itself.
+- Transcript folders are named by an encoding of the absolute project path;
+  re-encoded per machine automatically.
+- OneDrive folders are reparse points; the tool stats through them.
 
 ## Report
 
-After pulling, note: the `doctor`/`adopt`/`status` output, how many sessions landed,
-whether the tiles show on reopen, and any project that came up "no local folder
-found" (so you know which files still need to move).
+After the pull, note: `doctor`/`adopt`/`status` output, how many sessions
+landed, and whether tiles appear on reopen. Flag any project reported as
+"no local folder found" (its files are missing — copy them and re-run adopt).
